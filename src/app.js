@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js";
-import { buildMermaid, debrief } from "./graph.js";
-import * as sync from "./sync.js";
+} from "./data.js?v=3";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=3";
+import { buildMermaid, debrief } from "./graph.js?v=3";
+import * as sync from "./sync.js?v=3";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -144,17 +144,17 @@ function simulerAvAvant70(montant) {
 //  Rendu — navigation par onglets
 // =============================================================
 const TABS = [
-  { id: "donnees", label: "📥 Données (CSV)" },
-  { id: "organigramme", label: "🗺️ Organigramme & Débrief" },
+  { id: "organigramme", label: "🏠 Résumé patrimonial" },
   { id: "famille", label: "👪 Famille" },
   { id: "patrimoine", label: "🏦 Patrimoine" },
+  { id: "assurancevie", label: "🛡️ Assurance-vie" },
   { id: "donations", label: "🎁 Donations réalisées" },
   { id: "abattements", label: "📊 Abattements dispo." },
   { id: "simulateur", label: "🧮 Simulateur" },
-  { id: "assurancevie", label: "🛡️ Assurance-vie" },
   { id: "baremes", label: "📚 Barèmes" },
+  { id: "donnees", label: "📥 Données & sauvegarde" },
 ];
-let currentTab = "donnees";
+let currentTab = "organigramme";
 
 function render() {
   const app = $("#app");
@@ -332,9 +332,18 @@ async function renderOrganigramme() {
   const persoRows = state.personnes
     .map((p) => `<div class="line"><span>${p.nom} <small class="muted">(${p.role})</small></span><b>${eur(d.parPersonne[p.id] || 0)}</b></div>`)
     .join("");
+  const CAT_LBL = { immobilier: "🏠 Immobilier", sci: "🏢 SCI", entreprise: "🏭 Entreprise", liquidites: "💶 Liquidités", titres: "📈 Titres", autre: "Autre" };
+  const totalCat = Object.values(d.parCategorie).reduce((s, v) => s + v, 0) || 1;
   const catRows = Object.entries(d.parCategorie)
-    .map(([k, v]) => `<div class="line"><span>${k}</span><b>${eur(v)}</b></div>`)
-    .join("") || `<div class="muted small">Aucun actif saisi.</div>`;
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => {
+      const p = (v / totalCat) * 100;
+      return `<div class="expo-row">
+        <div class="expo-head"><span>${CAT_LBL[k] || k}</span><b>${eur(v)} <span class="muted">· ${p.toFixed(0)} %</span></b></div>
+        <div class="gauge"><div class="gauge-fill" style="width:${p}%"></div></div>
+      </div>`;
+    })
+    .join("") || `<div class="muted small">Aucun actif saisi — va dans l'onglet 🏦 Patrimoine.</div>`;
 
   c.innerHTML = `
     ${
@@ -351,8 +360,8 @@ async function renderOrganigramme() {
         <p class="muted small">Les biens logés dans une SCI ne sont pas recomptés : chacun détient des <i>parts</i> de SCI.</p>
       </div>
       <div class="card">
-        <h3>🏦 Répartition par catégorie</h3>
-        <div class="result">${catRows}</div>
+        <h3>📊 Exposition patrimoniale</h3>
+        ${catRows}
       </div>
       <div class="card">
         <h3>🎁 Donations</h3>

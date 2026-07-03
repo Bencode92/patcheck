@@ -128,6 +128,9 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .benef-chk { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
 .benef-chk input { width: auto; }
 
+.expo-row { margin-bottom: 12px; }
+.expo-head { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 5px; }
+
 .chips { display: flex; gap: 8px; flex-wrap: wrap; }
 .chip { background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 13px; }
 
