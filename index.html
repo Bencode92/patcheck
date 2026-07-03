@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Patrimoine Famille — Donations & Succession</title>
+    <link rel="stylesheet" href="src/styles.css" />
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>🏛️ Patrimoine Famille</h1>
+        <p class="subtitle">Donations, abattements, démembrement & succession — vision consolidée</p>
+      </div>
+      <div class="toolbar">
+        <button id="export" class="btn ghost">⬇ Exporter</button>
+        <label class="btn ghost">⬆ Importer<input id="import" type="file" accept="application/json" hidden /></label>
+        <button id="reset" class="btn ghost danger">Réinitialiser</button>
+      </div>
+    </header>
+    <div id="app"></div>
+    <footer>
+      Données stockées <b>localement dans ton navigateur</b> (localStorage) — rien n'est envoyé sur Internet.
+      Barèmes indicatifs 2026, à valider avec un notaire.
+    </footer>
+    <script type="module" src="src/app.js"></script>
+  </body>
+</html>
