@@ -58,6 +58,12 @@ export function buildMermaid(state) {
     (a.beneficiaires || []).forEach((b) => L.push(`  ${a.id} -.->|bénéf.| ${b}`));
   });
 
+  // Dettes (nœud rouge relié à l'actif/personne grevé)
+  (state.dettes || []).forEach((x) => {
+    L.push(`  ${x.id}>"💳 ${clean(x.libelle)}<br/><b>− ${eur0(x.montant)}</b>"]:::dette`);
+    if (x.cible) L.push(`  ${x.id} -.->|dette| ${x.cible}`);
+  });
+
   // Donations (arêtes épaisses avec montant + date)
   state.donations.forEach((d) => {
     const an = new Date(d.date).getFullYear() || "";
@@ -73,6 +79,7 @@ export function buildMermaid(state) {
   L.push("  classDef cash fill:#1e3535,stroke:#2ecc9b,color:#fff;");
   L.push("  classDef titres fill:#2a2440,stroke:#7aa2f7,color:#fff;");
   L.push("  classDef av fill:#3a1e2e,stroke:#f472b6,color:#fff;");
+  L.push("  classDef dette fill:#3a1e1e,stroke:#e5484d,color:#fff;");
   L.push("  classDef autre fill:#222c36,stroke:#5a6b7b,color:#fff;");
   return L.join("\n");
 }
@@ -86,30 +93,50 @@ export function debrief(state) {
   const av = state.av || [];
   const parents = personnes.filter((p) => p.role === "parent");
   const enfants = personnes.filter((p) => p.role === "enfant");
+  const dettes = state.dettes || [];
   const actif = (id) => actifs.find((a) => a.id === id);
   const estPersonne = (id) => personnes.some((p) => p.id === id);
+  const estActif = (id) => actifs.some((a) => a.id === id);
 
-  // Patrimoine détenu par les personnes (les biens logés dans une SCI ne
-  // sont PAS recomptés : les personnes détiennent les parts de SCI).
+  // Dettes : ventilées par actif (grèvent la valeur du bien/SCI) ou par
+  // personne (passif personnel). Elles réduisent l'assiette taxable.
+  const detteParActif = {}, detteParPersonne = {};
+  let totalDettes = 0;
+  dettes.forEach((x) => {
+    totalDettes += x.montant;
+    if (estActif(x.cible)) detteParActif[x.cible] = (detteParActif[x.cible] || 0) + x.montant;
+    else if (estPersonne(x.cible)) detteParPersonne[x.cible] = (detteParPersonne[x.cible] || 0) + x.montant;
+  });
+  const actifNet = (id) => {
+    const a = actif(id);
+    return a ? Math.max(0, a.valeur - (detteParActif[id] || 0)) : 0;
+  };
+
+  // Patrimoine NET détenu par les personnes (biens logés en SCI non recomptés :
+  // les personnes détiennent les parts de SCI ; dette de la SCI déjà déduite).
   const parPersonne = {};
   personnes.forEach((p) => (parPersonne[p.id] = 0));
   let patrimoineFoyer = 0;
   detentions.forEach((d) => {
     if (!estPersonne(d.proprietaire)) return; // détenu par une SCI -> ignoré au niveau foyer
-    const a = actif(d.actifRef);
-    if (!a) return;
-    const val = (a.valeur * d.part) / 100;
+    if (!actif(d.actifRef)) return;
+    const val = (actifNet(d.actifRef) * d.part) / 100;
     parPersonne[d.proprietaire] += val;
     patrimoineFoyer += val;
   });
+  // Dettes personnelles
+  Object.entries(detteParPersonne).forEach(([pid, m]) => {
+    if (parPersonne[pid] !== undefined) parPersonne[pid] -= m;
+    patrimoineFoyer -= m;
+  });
 
-  // Répartition par catégorie
+  // Répartition par catégorie (valeur nette)
   const parCategorie = {};
   detentions.forEach((d) => {
     if (!estPersonne(d.proprietaire)) return;
     const a = actif(d.actifRef);
     if (!a) return;
-    parCategorie[a.categorie] = (parCategorie[a.categorie] || 0) + (a.valeur * d.part) / 100;
+    parCategorie[a.categorie] = (parCategorie[a.categorie] || 0) + (actifNet(d.actifRef) * d.part) / 100;
   });
 
   // Donations : total, rapportables (<15 ans), purgées
@@ -148,7 +175,7 @@ export function debrief(state) {
     if (!estPersonne(d.proprietaire)) return;
     const a = actif(d.actifRef);
     if (a && a.categorie === "entreprise" && a.dutreil) {
-      exonerationDutreil += (DUTREIL_EXO * a.valeur * d.part) / 100;
+      exonerationDutreil += (DUTREIL_EXO * actifNet(d.actifRef) * d.part) / 100;
     }
   });
   const patrimoineTaxable = Math.max(0, patrimoineFoyer - exonerationDutreil);
@@ -176,10 +203,45 @@ export function debrief(state) {
     });
   });
 
+  // ------- Reste à faire / pistes d'optimisation -------
+  const reco = [];
+  const eur = (n) => Math.round(n).toLocaleString("fr-FR") + " €";
+  if (capaciteExoneree > 0)
+    reco.push({ level: "action", text: `Vous pouvez encore donner <b>${eur(capaciteExoneree)}</b> en franchise de droits (abattements parent→enfant non utilisés, 100 000 € /parent /enfant /15 ans).` });
+  // Enfants sans donation reçue
+  enfants.forEach((enf) => {
+    const recu = donations.filter((d) => d.beneficiaireId === enf.id).reduce((s, d) => s + d.montant, 0);
+    if (recu === 0)
+      reco.push({ level: "info", text: `<b>${enf.nom}</b> n'a encore reçu aucune donation : ${eur(ABATTEMENTS.enfant * parents.length)} transmissibles en franchise dès maintenant.` });
+  });
+  // AV sans clause bénéficiaire
+  av.forEach((a) => {
+    if (!a.beneficiaires || a.beneficiaires.length === 0)
+      reco.push({ level: "warn", text: `Le contrat d'assurance-vie <b>${a.libelle || a.id}</b> n'a pas de clause bénéficiaire renseignée — à définir (risque de requalification au profit de la succession).` });
+  });
+  // Donations proches de la purge des 15 ans (l'abattement va se recharger)
+  donations.forEach((d) => {
+    const reste = DELAI_RAPPEL_ANS - anneesEcoulees(d.date);
+    if (reste > 0 && reste < 2)
+      reco.push({ level: "info", text: `La donation de ${eur(d.montant)} (${new Date(d.date).getFullYear()}) sort du rappel fiscal dans ${reste.toFixed(1)} an(s) : l'abattement correspondant se rechargera alors.` });
+  });
+  // Dettes déductibles
+  if (totalDettes > 0)
+    reco.push({ level: "ok", text: `<b>${eur(totalDettes)}</b> de dettes réduisent l'assiette taxable (levier classique : porter l'emprunt dans la SCI/société abaisse la valeur nette transmise).` });
+  // Dutreil non activé sur du capital entreprise
+  const entrepriseSansDutreil = actifs.filter((a) => a.categorie === "entreprise" && !a.dutreil);
+  entrepriseSansDutreil.forEach((a) =>
+    reco.push({ level: "action", text: `Le capital entreprise <b>${a.libelle}</b> (${eur(a.valeur)}) n'a pas de pacte Dutreil : un engagement collectif pourrait exonérer 75 % de sa valeur.` })
+  );
+  if (droitsSuccessionEstimes > 0 && enfants.length)
+    reco.push({ level: "info", text: `Droits de succession estimés aujourd'hui : <b>${eur(droitsSuccessionEstimes)}</b>. Le démembrement (donner la nue-propriété) et les donations anticipées réduisent fortement ce montant — voir le Simulateur.` });
+
   return {
     patrimoineFoyer,
     patrimoineTaxable,
     exonerationDutreil,
+    totalDettes,
+    reco,
     parPersonne,
     parCategorie,
     dejaDonneTotal,

@@ -5,6 +5,7 @@ import {
 } from "./data.js";
 import { templateCSV, stateToCSV, csvToState } from "./csv.js";
 import { buildMermaid, debrief } from "./graph.js";
+import * as sync from "./sync.js";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -41,6 +42,7 @@ const defaultState = () => ({
   ],
   actifs: [],
   detentions: [],
+  dettes: [],
   donations: [],
   av: [],
 });
@@ -52,6 +54,7 @@ function load() {
     // rétro-compat : garantit les nouveaux tableaux
     s.actifs ||= [];
     s.detentions ||= [];
+    s.dettes ||= [];
     s.donations ||= [];
     s.av ||= [];
     return s;
@@ -59,8 +62,10 @@ function load() {
     return defaultState();
   }
 }
+let cloudStatusCb = null;
 function save() {
   localStorage.setItem(KEY, JSON.stringify(state));
+  sync.scheduleAutoSave(() => state, (s, info) => cloudStatusCb?.(s, info));
 }
 const personne = (id) => state.personnes.find((p) => p.id === id);
 const parents = () => state.personnes.filter((p) => p.role === "parent");
@@ -191,9 +196,14 @@ function renderDonnees() {
   const c = $("#tab-content");
   const n = (arr) => (arr || []).length;
   c.innerHTML = `
+    <div class="card" id="cloud-card">
+      <h2>☁️ Sauvegarde en ligne</h2>
+      <div id="cloud-body"><span class="muted">Détection du stockage cloud…</span></div>
+    </div>
+
     <div class="card">
       <h2>Import / export CSV</h2>
-      <p class="muted">Remplis un tableur avec tes vraies données, exporte en CSV, puis importe-le ici. L'organigramme et le débrief se génèrent automatiquement.</p>
+      <p class="muted">Remplis un tableur avec tes vraies données, exporte en CSV, puis importe-le ici. L'organigramme et le débrief se génèrent automatiquement. Tu peux aussi ré-exporter à tout moment le CSV consolidé pour l'envoyer à un tiers.</p>
       <div class="form-row" style="align-items:center">
         <button id="dl_template" class="btn primary">⬇ Télécharger le modèle CSV</button>
         <button id="dl_export" class="btn">⬇ Exporter mes données (CSV)</button>
@@ -221,6 +231,7 @@ function renderDonnees() {
         <tr><td><b>detention</b></td><td>Qui détient quoi</td><td>proprietaire (id perso ou SCI), actif_ref, part_pct, droit (PP/US/NP)</td></tr>
         <tr><td><b>donation</b></td><td>Donation déjà faite</td><td>proprietaire (donateur), beneficiaire, date, montant</td></tr>
         <tr><td><b>av</b></td><td>Contrat d'assurance-vie</td><td>id, libelle, proprietaire (souscripteur), valeur, beneficiaire (séparés par ;), avant_70 (oui/non)</td></tr>
+        <tr><td><b>dette</b></td><td>Un emprunt / passif</td><td>id, libelle, valeur (montant dû), actif_ref (SCI/bien grevé) ou proprietaire (dette perso)</td></tr>
       </tbody></table>
       <p class="muted small">💡 <b>id</b> = un code court que tu choisis (P1, E1, SCI1…) et que tu réutilises dans les colonnes <b>proprietaire</b>, <b>actif_ref</b>, <b>beneficiaire</b> pour relier les lignes entre elles.</p>
       <p class="muted small">🏭 <b>Pacte Dutreil</b> : sur une ligne <b>actif</b> de catégorie <code>entreprise</code>, mets <b>oui</b> dans la colonne <b>dutreil</b> pour appliquer l'exonération de 75 % (art. 787 B) sur l'assiette taxable.</p>
@@ -244,6 +255,53 @@ function renderDonnees() {
       }
     };
     reader.readAsText(file);
+  });
+
+  renderCloudCard();
+}
+
+async function renderCloudCard() {
+  const body = $("#cloud-body");
+  if (!body) return;
+  const dispo = await sync.cloudAvailable();
+  if (!dispo) {
+    body.innerHTML = `<p class="muted">Cette version est hébergée <b>sans stockage cloud</b> (GitHub Pages / fichier local). Tes données restent dans ce navigateur.<br>Pour la sauvegarde en ligne multi-appareils, ouvre l'app depuis le déploiement <b>Cloudflare</b> (voir README, section Cloudflare).</p>`;
+    return;
+  }
+  body.innerHTML = `
+    <p class="muted">Stockage cloud détecté ✅ — tes données peuvent être sauvegardées en ligne (privé, protégé par mot de passe).</p>
+    <div class="form-row">
+      <label>Mot de passe<input type="password" id="cl_pwd" value="${sync.getPassword()}" placeholder="mot de passe partagé"></label>
+      <label style="flex-direction:row;align-items:center;gap:8px;min-width:200px">
+        <input type="checkbox" id="cl_auto" ${sync.isAuto() ? "checked" : ""} style="width:auto"> Sauvegarde automatique
+      </label>
+    </div>
+    <div class="form-row">
+      <button id="cl_save" class="btn primary">☁️ Sauvegarder maintenant</button>
+      <button id="cl_load" class="btn">⬇ Charger depuis le cloud</button>
+    </div>
+    <div id="cl_status" class="muted small"></div>`;
+
+  const status = (msg, color = "var(--muted)") => ($("#cl_status").innerHTML = `<span style="color:${color}">${msg}</span>`);
+  cloudStatusCb = (s, info) => {
+    if (s === "pending") status("💾 sauvegarde en cours…");
+    else if (s === "saved") status("✅ sauvegardé " + (info ? "à " + new Date(info).toLocaleTimeString("fr-FR") : ""), "var(--accent-2)");
+    else if (s === "error") status("⚠️ " + info, "var(--danger)");
+  };
+  $("#cl_pwd").addEventListener("input", (e) => sync.setPassword(e.target.value));
+  $("#cl_auto").addEventListener("change", (e) => { sync.setAuto(e.target.checked); status(e.target.checked ? "auto-sauvegarde activée" : "auto-sauvegarde désactivée"); });
+  $("#cl_save").addEventListener("click", async () => {
+    sync.setPassword($("#cl_pwd").value);
+    try { const r = await sync.cloudSave(state); status("✅ sauvegardé à " + new Date(r.savedAt).toLocaleTimeString("fr-FR"), "var(--accent-2)"); }
+    catch (e) { status("❌ " + e.message, "var(--danger)"); }
+  });
+  $("#cl_load").addEventListener("click", async () => {
+    sync.setPassword($("#cl_pwd").value);
+    try {
+      const data = await sync.cloudLoad();
+      if (!data) { status("Aucune donnée en ligne pour l'instant.", "var(--warn)"); return; }
+      state = data; save(); status("✅ données chargées depuis le cloud", "var(--accent-2)"); renderDonnees();
+    } catch (e) { status("❌ " + e.message, "var(--danger)"); }
   });
 }
 
@@ -298,6 +356,50 @@ async function renderOrganigramme() {
         <p class="muted small">*Estimation simplifiée : décès des 2 parents, patrimoine réparti également entre ${d.nbEnfants} enfant(s), 2 abattements de 100 000 € par enfant. Hors AV. Voir l'onglet Simulateur pour le détail.</p>
       </div>
     </div>
+
+    ${
+      d.totalDettes > 0
+        ? `<div class="card"><div class="result">
+             <div class="line"><span>Valeur brute détenue par le foyer</span><b>${eur(d.patrimoineFoyer + d.totalDettes)}</b></div>
+             <div class="line"><span>Dettes (SCI / pro / perso)</span><b style="color:var(--danger)">− ${eur(d.totalDettes)}</b></div>
+             <div class="line total"><span>Patrimoine net du foyer</span><b>${eur(d.patrimoineFoyer)}</b></div>
+           </div></div>`
+        : ""
+    }
+
+    <div class="card">
+      <h2>🎯 Clauses bénéficiaires (assurance-vie)</h2>
+      ${
+        (state.av || []).length
+          ? `<table class="grid"><thead><tr><th>Contrat</th><th>Souscripteur</th><th>Capital</th><th>Régime</th><th>Bénéficiaires</th></tr></thead><tbody>
+            ${state.av
+              .map(
+                (a) => `<tr>
+                  <td><b>${a.libelle || a.id}</b></td>
+                  <td>${personne(a.souscripteurId)?.nom || a.souscripteurId || "?"}</td>
+                  <td>${eur(a.montant)}</td>
+                  <td>${a.avant70 ? "avant 70 ans" : "après 70 ans"}</td>
+                  <td>${(a.beneficiaires || []).map((b) => personne(b)?.nom || b).join(", ") || `<span class="badge warn">à définir</span>`}</td>
+                </tr>`
+              )
+              .join("")}
+          </tbody></table>`
+          : `<p class="muted">Aucun contrat d'assurance-vie saisi.</p>`
+      }
+    </div>
+
+    ${
+      (d.reco || []).length
+        ? `<div class="card">
+             <h2>✅ Reste à faire & optimisation</h2>
+             <div class="reco-list">
+               ${d.reco
+                 .map((r) => `<div class="reco reco-${r.level}"><span class="reco-ico">${{ action: "➡️", info: "ℹ️", warn: "⚠️", ok: "✔️" }[r.level] || "•"}</span><span>${r.text}</span></div>`)
+                 .join("")}
+             </div>
+           </div>`
+        : ""
+    }
 
     <div class="card">
       <h2>⚰️ Si décès aujourd'hui — droits par enfant</h2>
@@ -756,7 +858,16 @@ function importData(file) {
   reader.readAsText(file);
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
+  // Au démarrage : si le cloud est configuré, on récupère la version en ligne.
+  if (sync.getPassword()) {
+    try {
+      if (await sync.cloudAvailable()) {
+        const remote = await sync.cloudLoad();
+        if (remote) { state = remote; localStorage.setItem(KEY, JSON.stringify(state)); }
+      }
+    } catch { /* silencieux : on garde la version locale */ }
+  }
   render();
   $("#export")?.addEventListener("click", exportData);
   $("#import")?.addEventListener("change", (e) => e.target.files[0] && importData(e.target.files[0]));

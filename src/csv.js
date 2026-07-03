@@ -34,6 +34,8 @@ export const TEMPLATE_ROWS = [
   ["detention", "", "", "", "", "", "", "P2", "B1", "50", "PP", "", "", "", "", ""],
   ["detention", "", "", "", "", "", "", "P1", "C1", "50", "PP", "", "", "", "", ""],
   ["detention", "", "", "", "", "", "", "P2", "C1", "50", "PP", "", "", "", "", ""],
+  ["dette", "DET1", "Emprunt immeuble locatif", "", "", "", "300000", "", "SCI1", "", "", "", "", "", "", "adossé à la SCI (déductible)"],
+  ["dette", "DET2", "Crédit résidence principale", "", "", "", "180000", "P1", "B1", "", "", "", "", "", "", ""],
   ["donation", "", "", "", "", "", "", "P1", "", "", "", "E1", "2019-05-01", "100000", "", "donation parts SCI (NP)"],
   ["donation", "", "", "", "", "", "", "P2", "", "", "", "E2", "2015-03-10", "80000", "", ""],
   ["av", "AV1", "Contrat AV Jean", "", "", "", "250000", "P1", "", "", "", "E1;E2;E3", "", "", "oui", "primes avant 70 ans"],
@@ -62,6 +64,9 @@ export function stateToCSV(state) {
   );
   (state.detentions || []).forEach((d) =>
     push({ type: "detention", proprietaire: d.proprietaire, actif_ref: d.actifRef, part_pct: d.part, droit: d.droit, note: d.note })
+  );
+  (state.dettes || []).forEach((x) =>
+    push({ type: "dette", id: x.id, libelle: x.libelle, valeur: x.montant, actif_ref: x.cible, note: x.note })
   );
   state.donations.forEach((d) =>
     push({ type: "donation", proprietaire: d.donateurId, beneficiaire: d.beneficiaireId, date: d.date, montant: d.montant, note: d.note })
@@ -109,7 +114,7 @@ export function csvToState(text) {
   COLUMNS.forEach((c) => (idx[c] = header.indexOf(c)));
   const get = (r, c) => (idx[c] >= 0 ? (r[idx[c]] ?? "").trim() : "");
 
-  const st = { personnes: [], actifs: [], detentions: [], donations: [], av: [] };
+  const st = { personnes: [], actifs: [], detentions: [], dettes: [], donations: [], av: [] };
   const num = (v) => Number(String(v).replace(/[^\d.-]/g, "")) || 0;
 
   for (let i = 1; i < rows.length; i++) {
@@ -125,6 +130,9 @@ export function csvToState(text) {
         break;
       case "detention":
         st.detentions.push({ proprietaire: get(r, "proprietaire"), actifRef: get(r, "actif_ref"), part: num(get(r, "part_pct")), droit: (get(r, "droit") || "PP").toUpperCase(), note: get(r, "note") });
+        break;
+      case "dette":
+        st.dettes.push({ id: get(r, "id") || uid(), libelle: get(r, "libelle"), montant: num(get(r, "valeur")), cible: get(r, "actif_ref") || get(r, "proprietaire"), note: get(r, "note") });
         break;
       case "donation":
         st.donations.push({ id: uid(), donateurId: get(r, "proprietaire"), beneficiaireId: get(r, "beneficiaire"), date: get(r, "date"), montant: num(get(r, "montant")), nature: "pleine", lien: "enfant", note: get(r, "note") });
