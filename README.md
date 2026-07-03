@@ -48,6 +48,29 @@ python3 -m http.server 8000
 Tous les barèmes sont centralisés dans [`src/data.js`](src/data.js) — faciles à mettre à
 jour à chaque loi de finances.
 
+## ☁️ Sauvegarde en ligne (Cloudflare) — optionnel
+
+GitHub Pages ne fait qu'afficher le site. Pour **saisir en ligne et sauvegarder
+de façon privée** (multi-appareils), déploie sur **Cloudflare Pages** avec le
+stockage **KV** — gratuit. Le code des données reste privé (dans ton compte
+Cloudflare), pas dans ce repo public.
+
+1. Crée un compte sur **dash.cloudflare.com**.
+2. **Workers & Pages → Create → Pages → Connect to Git** → choisis le repo `patcheck`.
+   - Build command : *(vide)* — Output directory : `/` (racine). Déploie.
+3. **Storage & Databases → KV → Create namespace** → nomme-le `patcheck-kv`.
+4. Reviens sur le projet Pages → **Settings → Bindings → Add → KV namespace** :
+   - Variable name : `PATCHECK_KV` → sélectionne le namespace créé.
+5. **Settings → Variables and secrets → Add** :
+   - `APP_PASSWORD` = ton mot de passe (type *Secret*).
+6. **Re-deploy** le projet (les bindings ne s'appliquent qu'au déploiement suivant).
+7. Ouvre l'URL `*.pages.dev` → onglet **Données** → section **☁️ Sauvegarde en
+   ligne** → saisis le mot de passe → coche *Sauvegarde automatique*.
+
+L'API (`functions/api/data.js`) est déjà dans le repo : Cloudflare la détecte
+automatiquement. Endpoint `/api/data` (GET charge, PUT sauvegarde), protégé par
+`APP_PASSWORD`, données stockées dans le KV privé.
+
 ## ⚠️ Avertissement
 
 Outil d'aide à la décision **à visée pédagogique**. Les résultats sont des estimations
