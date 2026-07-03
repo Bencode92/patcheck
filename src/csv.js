@@ -6,12 +6,12 @@
 export const COLUMNS = [
   "type", "id", "libelle", "role", "naissance", "categorie", "valeur",
   "proprietaire", "actif_ref", "part_pct", "droit", "beneficiaire",
-  "date", "montant", "avant_70", "note",
+  "date", "montant", "avant_70", "note", "dutreil",
 ];
 
 // Modèle vierge documenté (avec exemples réalistes à remplacer)
 export const TEMPLATE_ROWS = [
-  ["# type", "id", "libelle", "role", "naissance", "categorie", "valeur", "proprietaire", "actif_ref", "part_pct", "droit", "beneficiaire", "date", "montant", "avant_70", "note"],
+  ["# type", "id", "libelle", "role", "naissance", "categorie", "valeur", "proprietaire", "actif_ref", "part_pct", "droit", "beneficiaire", "date", "montant", "avant_70", "note", "dutreil"],
   ["personne", "P1", "Jean Dupont", "parent", "1958-04-12", "", "", "", "", "", "", "", "", "", "", "père"],
   ["personne", "P2", "Anne Dupont", "parent", "1961-09-03", "", "", "", "", "", "", "", "", "", "", "mère"],
   ["personne", "E1", "Marie", "enfant", "1988-01-20", "", "", "", "", "", "", "", "", "", "", ""],
@@ -22,7 +22,8 @@ export const TEMPLATE_ROWS = [
   ["actif", "B2", "Immeuble locatif", "", "", "immobilier", "900000", "", "", "", "", "", "", "", "", "logé dans la SCI"],
   ["actif", "C1", "Comptes & liquidités", "", "", "liquidites", "120000", "", "", "", "", "", "", "", "", ""],
   ["actif", "T1", "Portefeuille titres", "", "", "titres", "180000", "", "", "", "", "", "", "", "", ""],
-  ["actif", "ENT1", "Parts société (capital entreprise)", "", "", "entreprise", "600000", "", "", "", "", "", "", "", "", "éligible pacte Dutreil ?"],
+  ["actif", "ENT1", "Parts société (capital entreprise)", "", "", "entreprise", "600000", "", "", "", "", "", "", "", "", "pacte Dutreil", "oui"],
+  ["detention", "", "", "", "", "", "", "P1", "ENT1", "100", "PP", "", "", "", "", "dirigeant", ""],
   ["detention", "", "", "", "", "", "", "P1", "SCI1", "50", "PP", "", "", "", "", "Jean 50% pleine propriété"],
   ["detention", "", "", "", "", "", "", "P2", "SCI1", "20", "PP", "", "", "", "", ""],
   ["detention", "", "", "", "", "", "", "P1", "SCI1", "10", "US", "", "", "", "", "usufruit conservé"],
@@ -57,7 +58,7 @@ export function stateToCSV(state) {
     push({ type: "personne", id: p.id, libelle: p.nom, role: p.role, naissance: p.naissance })
   );
   (state.actifs || []).forEach((a) =>
-    push({ type: "actif", id: a.id, libelle: a.libelle, categorie: a.categorie, valeur: a.valeur })
+    push({ type: "actif", id: a.id, libelle: a.libelle, categorie: a.categorie, valeur: a.valeur, dutreil: a.dutreil ? "oui" : "" })
   );
   (state.detentions || []).forEach((d) =>
     push({ type: "detention", proprietaire: d.proprietaire, actif_ref: d.actifRef, part_pct: d.part, droit: d.droit, note: d.note })
@@ -120,7 +121,7 @@ export function csvToState(text) {
         st.personnes.push({ id: get(r, "id") || uid(), nom: get(r, "libelle"), role: get(r, "role") || "enfant", naissance: get(r, "naissance") });
         break;
       case "actif":
-        st.actifs.push({ id: get(r, "id") || uid(), libelle: get(r, "libelle"), categorie: get(r, "categorie") || "autre", valeur: num(get(r, "valeur")) });
+        st.actifs.push({ id: get(r, "id") || uid(), libelle: get(r, "libelle"), categorie: get(r, "categorie") || "autre", valeur: num(get(r, "valeur")), dutreil: /oui|1|true/i.test(get(r, "dutreil")) });
         break;
       case "detention":
         st.detentions.push({ proprietaire: get(r, "proprietaire"), actifRef: get(r, "actif_ref"), part: num(get(r, "part_pct")), droit: (get(r, "droit") || "PP").toUpperCase(), note: get(r, "note") });

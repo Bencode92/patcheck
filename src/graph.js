@@ -3,6 +3,9 @@
 // =============================================================
 import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE } from "./data.js";
 
+// Taux d'exonération Dutreil (art. 787 B) sur les titres de société éligibles
+const DUTREIL_EXO = 0.75;
+
 const eur0 = (n) => Math.round(n || 0).toLocaleString("fr-FR") + " €";
 function anneesEcoulees(d) {
   return (new Date() - new Date(d)) / (365.25 * 864e5);
@@ -34,7 +37,7 @@ export function buildMermaid(state) {
     const lbl = `${clean(a.libelle)}<br/><b>${eur0(a.valeur)}</b>`;
     if (a.categorie === "sci") L.push(`  ${a.id}{{"🏢 ${lbl}"}}:::sci`);
     else if (a.categorie === "immobilier") L.push(`  ${a.id}["🏠 ${lbl}"]:::immo`);
-    else if (a.categorie === "entreprise") L.push(`  ${a.id}[["🏭 ${lbl}"]]:::entreprise`);
+    else if (a.categorie === "entreprise") L.push(`  ${a.id}[["🏭 ${lbl}${a.dutreil ? "<br/><small>Dutreil −75%</small>" : ""}"]]:::entreprise`);
     else if (a.categorie === "liquidites") L.push(`  ${a.id}[("💶 ${lbl}")]:::cash`);
     else if (a.categorie === "titres") L.push(`  ${a.id}["📈 ${lbl}"]:::titres`);
     else L.push(`  ${a.id}["${lbl}"]:::autre`);
@@ -138,15 +141,28 @@ export function debrief(state) {
   // Hypothèse simple : patrimoine réparti également entre les enfants, chaque
   // enfant bénéficiant d'un abattement de 100 000 € par parent (art. 779),
   // diminué des donations déjà consenties dans les 15 ans (rappel fiscal).
+  // Exonération Dutreil : 75 % de la valeur des titres d'entreprise éligibles
+  // détenus par des personnes physiques sortent de la base taxable.
+  let exonerationDutreil = 0;
+  detentions.forEach((d) => {
+    if (!estPersonne(d.proprietaire)) return;
+    const a = actif(d.actifRef);
+    if (a && a.categorie === "entreprise" && a.dutreil) {
+      exonerationDutreil += (DUTREIL_EXO * a.valeur * d.part) / 100;
+    }
+  });
+  const patrimoineTaxable = Math.max(0, patrimoineFoyer - exonerationDutreil);
+
   let droitsSuccessionEstimes = 0;
   const successionParEnfant = [];
-  const partParEnfant = enfants.length ? patrimoineFoyer / enfants.length : 0;
+  const partParEnfant = enfants.length ? patrimoineFoyer / enfants.length : 0;          // économique (reçu)
+  const partTaxableParEnfant = enfants.length ? patrimoineTaxable / enfants.length : 0; // après Dutreil
   enfants.forEach((enf) => {
     const consomme = donations
       .filter((d) => d.beneficiaireId === enf.id && anneesEcoulees(d.date) < DELAI_RAPPEL_ANS)
       .reduce((s, d) => s + d.montant, 0);
     const abattementDispo = Math.max(0, ABATTEMENTS.enfant * parents.length - consomme);
-    const base = Math.max(0, partParEnfant - abattementDispo);
+    const base = Math.max(0, partTaxableParEnfant - abattementDispo);
     const droits = calculDroits(base, BAREME_LIGNE_DIRECTE);
     droitsSuccessionEstimes += droits;
     successionParEnfant.push({
@@ -162,6 +178,8 @@ export function debrief(state) {
 
   return {
     patrimoineFoyer,
+    patrimoineTaxable,
+    exonerationDutreil,
     parPersonne,
     parCategorie,
     dejaDonneTotal,

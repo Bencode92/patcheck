@@ -223,6 +223,7 @@ function renderDonnees() {
         <tr><td><b>av</b></td><td>Contrat d'assurance-vie</td><td>id, libelle, proprietaire (souscripteur), valeur, beneficiaire (séparés par ;), avant_70 (oui/non)</td></tr>
       </tbody></table>
       <p class="muted small">💡 <b>id</b> = un code court que tu choisis (P1, E1, SCI1…) et que tu réutilises dans les colonnes <b>proprietaire</b>, <b>actif_ref</b>, <b>beneficiaire</b> pour relier les lignes entre elles.</p>
+      <p class="muted small">🏭 <b>Pacte Dutreil</b> : sur une ligne <b>actif</b> de catégorie <code>entreprise</code>, mets <b>oui</b> dans la colonne <b>dutreil</b> pour appliquer l'exonération de 75 % (art. 787 B) sur l'assiette taxable.</p>
     </div>`;
 
   $("#dl_template").addEventListener("click", () => download("modele-patrimoine.csv", templateCSV()));
@@ -301,6 +302,15 @@ async function renderOrganigramme() {
     <div class="card">
       <h2>⚰️ Si décès aujourd'hui — droits par enfant</h2>
       <p class="muted small">Hypothèse : décès des ${d.nbParents} parent(s), patrimoine du foyer (${eur(d.patrimoineFoyer)}) réparti également entre ${d.nbEnfants} enfant(s). Abattement de 100 000 € par parent et par enfant, minoré des donations des 15 dernières années. Hors assurance-vie (fiscalité propre).</p>
+      ${
+        d.exonerationDutreil > 0
+          ? `<div class="result" style="margin-bottom:12px">
+               <div class="line"><span>Patrimoine économique transmis</span><b>${eur(d.patrimoineFoyer)}</b></div>
+               <div class="line"><span>Exonération pacte Dutreil (−75 % titres éligibles, art. 787 B)</span><b style="color:var(--accent-2)">− ${eur(d.exonerationDutreil)}</b></div>
+               <div class="line total"><span>Assiette taxable après Dutreil</span><b>${eur(d.patrimoineTaxable)}</b></div>
+             </div>`
+          : ""
+      }
       <table class="grid"><thead><tr>
         <th>Enfant</th><th>Part reçue</th><th>Abattement dispo.</th><th>Base taxable</th><th>Droits à payer</th><th>Net perçu</th><th>Taux</th>
       </tr></thead><tbody>
