@@ -147,6 +147,7 @@ const TABS = [
   { id: "donnees", label: "📥 Données (CSV)" },
   { id: "organigramme", label: "🗺️ Organigramme & Débrief" },
   { id: "famille", label: "👪 Famille" },
+  { id: "patrimoine", label: "🏦 Patrimoine" },
   { id: "donations", label: "🎁 Donations réalisées" },
   { id: "abattements", label: "📊 Abattements dispo." },
   { id: "simulateur", label: "🧮 Simulateur" },
@@ -175,6 +176,7 @@ function render() {
     donnees: renderDonnees,
     organigramme: renderOrganigramme,
     famille: renderFamille,
+    patrimoine: renderPatrimoine,
     donations: renderDonations,
     abattements: renderAbattements,
     simulateur: renderSimulateur,
@@ -386,11 +388,12 @@ async function renderOrganigramme() {
       <h2>🎯 Clauses bénéficiaires (assurance-vie)</h2>
       ${
         (state.av || []).length
-          ? `<table class="grid"><thead><tr><th>Contrat</th><th>Souscripteur</th><th>Capital</th><th>Régime</th><th>Bénéficiaires</th></tr></thead><tbody>
+          ? `<table class="grid"><thead><tr><th>Contrat</th><th>Banque/Assureur</th><th>Souscripteur</th><th>Capital</th><th>Régime</th><th>Bénéficiaires</th></tr></thead><tbody>
             ${state.av
               .map(
                 (a) => `<tr>
                   <td><b>${a.libelle || a.id}</b></td>
+                  <td>${a.etablissement || "—"}</td>
                   <td>${personne(a.souscripteurId)?.nom || a.souscripteurId || "?"}</td>
                   <td>${eur(a.montant)}</td>
                   <td>${a.avant70 ? "avant 70 ans" : "après 70 ans"}</td>
@@ -468,7 +471,7 @@ async function renderOrganigramme() {
   const def = buildMermaid(state);
   try {
     const mermaid = (await import("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs")).default;
-    mermaid.initialize({ startOnLoad: false, theme: "dark", securityLevel: "loose", flowchart: { curve: "basis" } });
+    mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "loose", flowchart: { curve: "basis" } });
     const { svg } = await mermaid.render("orgchart", def);
     box.innerHTML = svg;
     $("#dl_svg").addEventListener("click", () => download("organigramme-patrimoine.svg", box.innerHTML, "image/svg+xml"));
@@ -536,6 +539,104 @@ function renderFamille() {
     save();
     renderFamille();
   });
+}
+
+// ---------- Onglet Patrimoine (actifs / détentions / dettes) ----------
+const CATEGORIES = [
+  ["immobilier", "🏠 Immobilier"],
+  ["sci", "🏢 SCI"],
+  ["entreprise", "🏭 Capital entreprise"],
+  ["liquidites", "💶 Liquidités / comptes"],
+  ["titres", "📈 Titres / placements"],
+  ["autre", "Autre"],
+];
+const opt = (list, sel) =>
+  list.map(([v, l]) => `<option value="${v}" ${v === sel ? "selected" : ""}>${l}</option>`).join("");
+const ownerList = () => [
+  ...state.personnes.map((p) => [p.id, "👤 " + p.nom]),
+  ...(state.actifs || []).map((a) => [a.id, "🏦 " + (a.libelle || a.id)]),
+];
+const actifList = () => (state.actifs || []).map((a) => [a.id, (a.libelle || a.id)]);
+
+function renderPatrimoine() {
+  const c = $("#tab-content");
+  const A = state.actifs || [], D = state.detentions || [], X = state.dettes || [];
+  c.innerHTML = `
+    <div class="card">
+      <h2>🏦 Actifs</h2>
+      <p class="muted small">Chaque bien, SCI, société ou compte. Le montant est la valeur vénale (nette de dette si tu ne saisis pas la dette à part).</p>
+      <table class="grid"><thead><tr><th>Libellé</th><th>Catégorie</th><th>Valeur (€)</th><th>Dutreil</th><th></th></tr></thead>
+      <tbody>
+      ${A.map((a, i) => `<tr data-i="${i}">
+        <td><input class="a_lib" value="${a.libelle || ""}"></td>
+        <td><select class="a_cat">${opt(CATEGORIES, a.categorie)}</select></td>
+        <td><input class="a_val" value="${a.valeur || ""}" inputmode="numeric"></td>
+        <td style="text-align:center">${a.categorie === "entreprise" ? `<input type="checkbox" class="a_dut" ${a.dutreil ? "checked" : ""}>` : "—"}</td>
+        <td><button class="a_del danger-link">✕</button></td>
+      </tr>`).join("") || `<tr><td colspan="5" class="muted center">Aucun actif. Ajoute-en un ci-dessous.</td></tr>`}
+      </tbody></table>
+      <button id="a_add" class="btn">+ Ajouter un actif</button>
+    </div>
+
+    <div class="card">
+      <h2>🔗 Qui détient quoi</h2>
+      <p class="muted small">Relie une personne (ou une SCI) à un actif : sa quote-part et son droit — pleine propriété, usufruit ou nue-propriété (démembrement).</p>
+      <table class="grid"><thead><tr><th>Propriétaire</th><th>Actif détenu</th><th>Part %</th><th>Droit</th><th></th></tr></thead>
+      <tbody>
+      ${D.map((d, i) => `<tr data-i="${i}">
+        <td><select class="d_prop">${opt(ownerList(), d.proprietaire)}</select></td>
+        <td><select class="d_act">${opt(actifList(), d.actifRef)}</select></td>
+        <td><input class="d_part" value="${d.part ?? ""}" inputmode="numeric" style="max-width:80px"></td>
+        <td><select class="d_droit">${opt([["PP", "Pleine propriété"], ["US", "Usufruit"], ["NP", "Nue-propriété"]], d.droit)}</select></td>
+        <td><button class="d_del danger-link">✕</button></td>
+      </tr>`).join("") || `<tr><td colspan="5" class="muted center">Aucune détention. Ajoute d'abord des actifs, puis relie-les.</td></tr>`}
+      </tbody></table>
+      <button id="d_add" class="btn" ${A.length ? "" : "disabled"}>+ Ajouter une détention</button>
+    </div>
+
+    <div class="card">
+      <h2>💳 Dettes</h2>
+      <p class="muted small">Emprunts / passifs. Ils réduisent le patrimoine net et l'assiette taxable. « Grève » = l'actif ou la personne concernés.</p>
+      <table class="grid"><thead><tr><th>Libellé</th><th>Montant dû (€)</th><th>Grève</th><th></th></tr></thead>
+      <tbody>
+      ${X.map((x, i) => `<tr data-i="${i}">
+        <td><input class="x_lib" value="${x.libelle || ""}"></td>
+        <td><input class="x_val" value="${x.montant || ""}" inputmode="numeric"></td>
+        <td><select class="x_cible">${opt(ownerList(), x.cible)}</select></td>
+        <td><button class="x_del danger-link">✕</button></td>
+      </tr>`).join("") || `<tr><td colspan="4" class="muted center">Aucune dette.</td></tr>`}
+      </tbody></table>
+      <button id="x_add" class="btn">+ Ajouter une dette</button>
+    </div>
+
+    <p class="muted small center">💾 Tout est enregistré automatiquement (et synchronisé dans le cloud si activé). Va dans <b>🗺️ Organigramme & Débrief</b> pour voir le résultat.</p>`;
+
+  // --- Actifs ---
+  $$("#tab-content .a_del").forEach((b, i) => b.addEventListener("click", () => { A.splice(i, 1); save(); renderPatrimoine(); }));
+  $$("#tab-content tr[data-i] .a_lib").forEach((el, i) => el.addEventListener("input", (e) => { A[i].libelle = e.target.value; save(); }));
+  $$("#tab-content tr[data-i] .a_val").forEach((el, i) => el.addEventListener("input", (e) => { A[i].valeur = parseNum(e.target.value); save(); }));
+  $$("#tab-content tr[data-i] .a_cat").forEach((el, i) => el.addEventListener("change", (e) => { A[i].categorie = e.target.value; save(); renderPatrimoine(); }));
+  $$("#tab-content tr[data-i] .a_dut").forEach((el, i) => el.addEventListener("change", (e) => { A[i].dutreil = e.target.checked; save(); }));
+  $("#a_add").addEventListener("click", () => { A.push({ id: uid(), libelle: "", categorie: "immobilier", valeur: 0, dutreil: false }); state.actifs = A; save(); renderPatrimoine(); });
+
+  // --- Détentions ---
+  $$("#tab-content .d_del").forEach((b, i) => b.addEventListener("click", () => { D.splice(i, 1); save(); renderPatrimoine(); }));
+  $$("#tab-content .d_prop").forEach((el, i) => el.addEventListener("change", (e) => { D[i].proprietaire = e.target.value; save(); }));
+  $$("#tab-content .d_act").forEach((el, i) => el.addEventListener("change", (e) => { D[i].actifRef = e.target.value; save(); }));
+  $$("#tab-content .d_part").forEach((el, i) => el.addEventListener("input", (e) => { D[i].part = parseNum(e.target.value); save(); }));
+  $$("#tab-content .d_droit").forEach((el, i) => el.addEventListener("change", (e) => { D[i].droit = e.target.value; save(); }));
+  $("#d_add")?.addEventListener("click", () => {
+    const first = A[0];
+    D.push({ proprietaire: state.personnes[0]?.id || "", actifRef: first?.id || "", part: 100, droit: "PP" });
+    state.detentions = D; save(); renderPatrimoine();
+  });
+
+  // --- Dettes ---
+  $$("#tab-content .x_del").forEach((b, i) => b.addEventListener("click", () => { X.splice(i, 1); save(); renderPatrimoine(); }));
+  $$("#tab-content .x_lib").forEach((el, i) => el.addEventListener("input", (e) => { X[i].libelle = e.target.value; save(); }));
+  $$("#tab-content .x_val").forEach((el, i) => el.addEventListener("input", (e) => { X[i].montant = parseNum(e.target.value); save(); }));
+  $$("#tab-content .x_cible").forEach((el, i) => el.addEventListener("change", (e) => { X[i].cible = e.target.value; save(); }));
+  $("#x_add").addEventListener("click", () => { X.push({ id: uid(), libelle: "", montant: 0, cible: ownerList()[0]?.[0] || "" }); state.dettes = X; save(); renderPatrimoine(); });
 }
 
 // ---------- Onglet Donations réalisées ----------
@@ -752,7 +853,33 @@ function renderSimulateur() {
 // ---------- Onglet Assurance-vie ----------
 function renderAv() {
   const c = $("#tab-content");
+  const AV = state.av || [];
+  const benefBoxes = (contrat, i) =>
+    state.personnes
+      .map((p) => `<label class="benef-chk"><input type="checkbox" class="av_ben" data-i="${i}" data-p="${p.id}" ${(contrat.beneficiaires || []).includes(p.id) ? "checked" : ""}> ${p.nom}</label>`)
+      .join("");
   c.innerHTML = `
+    <div class="card">
+      <h2>🛡️ Mes contrats d'assurance-vie</h2>
+      <p class="muted small">Renseigne chaque contrat, son souscripteur, le capital, le régime (avant/après 70 ans) et coche les <b>bénéficiaires</b> (clause bénéficiaire).</p>
+      ${AV.map((a, i) => `
+        <div class="av-edit" data-i="${i}">
+          <div class="form-row">
+            <label>Libellé<input class="av_lib" value="${a.libelle || ""}" placeholder="ex : Contrat retraite"></label>
+            <label>Banque / Assureur<input class="av_etab" value="${a.etablissement || ""}" placeholder="ex : Linxea, BNP…"></label>
+            <label>Souscripteur<select class="av_sous">${opt(state.personnes.map((p) => [p.id, p.nom]), a.souscripteurId)}</select></label>
+          </div>
+          <div class="form-row">
+            <label>Capital (€)<input class="av_mnt" value="${a.montant || ""}" inputmode="numeric"></label>
+            <label>Régime<select class="av_av70">${opt([["oui", "Avant 70 ans"], ["non", "Après 70 ans"]], a.avant70 ? "oui" : "non")}</select></label>
+          </div>
+          <div class="benef-row"><span class="muted small">Bénéficiaires :</span> ${benefBoxes(a, i)}
+            <button class="av_del danger-link" title="Supprimer">✕ contrat</button>
+          </div>
+        </div>`).join("") || `<p class="muted">Aucun contrat. Ajoute-en un.</p>`}
+      <button id="av_add" class="btn">+ Ajouter un contrat</button>
+    </div>
+
     <div class="card">
       <h2>Assurance-vie — fiscalité au décès</h2>
       <div class="form-row">
@@ -772,6 +899,29 @@ function renderAv() {
         AV_APRES_70.abattementGlobal
       )} (tous bénéficiaires), les primes excédentaires réintègrent la succession — mais les gains restent exonérés.</p>
     </div>`;
+
+  // --- Édition des contrats AV ---
+  $$("#tab-content .av-edit").forEach((row) => {
+    const i = +row.dataset.i;
+    $(".av_lib", row).addEventListener("input", (e) => { AV[i].libelle = e.target.value; save(); });
+    $(".av_etab", row).addEventListener("input", (e) => { AV[i].etablissement = e.target.value; save(); });
+    $(".av_sous", row).addEventListener("change", (e) => { AV[i].souscripteurId = e.target.value; save(); });
+    $(".av_mnt", row).addEventListener("input", (e) => { AV[i].montant = parseNum(e.target.value); save(); });
+    $(".av_av70", row).addEventListener("change", (e) => { AV[i].avant70 = e.target.value === "oui"; save(); });
+    $(".av_del", row).addEventListener("click", () => { AV.splice(i, 1); save(); renderAv(); });
+  });
+  $$("#tab-content .av_ben").forEach((cb) => cb.addEventListener("change", (e) => {
+    const i = +e.target.dataset.i, pid = e.target.dataset.p;
+    AV[i].beneficiaires = AV[i].beneficiaires || [];
+    if (e.target.checked) { if (!AV[i].beneficiaires.includes(pid)) AV[i].beneficiaires.push(pid); }
+    else AV[i].beneficiaires = AV[i].beneficiaires.filter((x) => x !== pid);
+    save();
+  }));
+  $("#av_add").addEventListener("click", () => {
+    AV.push({ id: uid(), libelle: "", souscripteurId: state.personnes.find((p) => p.role === "parent")?.id || "", montant: 0, avant70: true, beneficiaires: [] });
+    state.av = AV; save(); renderAv();
+  });
+
   $("#av_go").addEventListener("click", () => {
     const m = parseNum($("#av_montant").value);
     const regime = $("#av_regime").value;

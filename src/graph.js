@@ -71,16 +71,16 @@ export function buildMermaid(state) {
   });
 
   // Styles
-  L.push("  classDef parent fill:#1e3a5f,stroke:#4ea1ff,color:#e7eef5;");
-  L.push("  classDef enfant fill:#243b2e,stroke:#2ecc9b,color:#e7eef5;");
-  L.push("  classDef sci fill:#3a2f1e,stroke:#f0a03c,color:#fff;");
-  L.push("  classDef immo fill:#2a2440,stroke:#a78bfa,color:#fff;");
-  L.push("  classDef entreprise fill:#3a2438,stroke:#e879c9,color:#fff;");
-  L.push("  classDef cash fill:#1e3535,stroke:#2ecc9b,color:#fff;");
-  L.push("  classDef titres fill:#2a2440,stroke:#7aa2f7,color:#fff;");
-  L.push("  classDef av fill:#3a1e2e,stroke:#f472b6,color:#fff;");
-  L.push("  classDef dette fill:#3a1e1e,stroke:#e5484d,color:#fff;");
-  L.push("  classDef autre fill:#222c36,stroke:#5a6b7b,color:#fff;");
+  L.push("  classDef parent fill:#dbeafe,stroke:#1668e3,color:#0f2747,stroke-width:2px;");
+  L.push("  classDef enfant fill:#d6f5e6,stroke:#0a9d6e,color:#0f2747,stroke-width:2px;");
+  L.push("  classDef sci fill:#fff0d6,stroke:#c77700,color:#0f2747;");
+  L.push("  classDef immo fill:#ede7ff,stroke:#7c5cff,color:#0f2747;");
+  L.push("  classDef entreprise fill:#fde4f4,stroke:#c026a3,color:#0f2747;");
+  L.push("  classDef cash fill:#d6f5ef,stroke:#0a9d6e,color:#0f2747;");
+  L.push("  classDef titres fill:#dce7ff,stroke:#3b6fe0,color:#0f2747;");
+  L.push("  classDef av fill:#ffe0ee,stroke:#e0489a,color:#0f2747;");
+  L.push("  classDef dette fill:#ffe0dd,stroke:#d92d20,color:#0f2747;");
+  L.push("  classDef autre fill:#eef3fa,stroke:#5c7691,color:#0f2747;");
   return L.join("\n");
 }
 

@@ -72,7 +72,7 @@ export function stateToCSV(state) {
     push({ type: "donation", proprietaire: d.donateurId, beneficiaire: d.beneficiaireId, date: d.date, montant: d.montant, note: d.note })
   );
   (state.av || []).forEach((a) =>
-    push({ type: "av", id: a.id, libelle: a.libelle, valeur: a.montant, proprietaire: a.souscripteurId, beneficiaire: (a.beneficiaires || []).join(";"), avant_70: a.avant70 ? "oui" : "non", note: a.note })
+    push({ type: "av", id: a.id, libelle: a.libelle, categorie: a.etablissement, valeur: a.montant, proprietaire: a.souscripteurId, beneficiaire: (a.beneficiaires || []).join(";"), avant_70: a.avant70 ? "oui" : "non", note: a.note })
   );
   return rows.map((r) => r.map(esc).join(",")).join("\n");
 }
@@ -138,7 +138,7 @@ export function csvToState(text) {
         st.donations.push({ id: uid(), donateurId: get(r, "proprietaire"), beneficiaireId: get(r, "beneficiaire"), date: get(r, "date"), montant: num(get(r, "montant")), nature: "pleine", lien: "enfant", note: get(r, "note") });
         break;
       case "av":
-        st.av.push({ id: get(r, "id") || uid(), libelle: get(r, "libelle"), souscripteurId: get(r, "proprietaire"), montant: num(get(r, "valeur")), beneficiaires: get(r, "beneficiaire").split(/[;|]/).map((s) => s.trim()).filter(Boolean), avant70: /oui|1|true|avant/i.test(get(r, "avant_70")), note: get(r, "note") });
+        st.av.push({ id: get(r, "id") || uid(), libelle: get(r, "libelle"), etablissement: get(r, "categorie"), souscripteurId: get(r, "proprietaire"), montant: num(get(r, "valeur")), beneficiaires: get(r, "beneficiaire").split(/[;|]/).map((s) => s.trim()).filter(Boolean), avant70: /oui|1|true|avant/i.test(get(r, "avant_70")), note: get(r, "note") });
         break;
       default:
         break; // ligne inconnue ignorée
