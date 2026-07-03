@@ -3,6 +3,8 @@ import {
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
 } from "./data.js";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js";
+import { buildMermaid, debrief } from "./graph.js";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -37,6 +39,8 @@ const defaultState = () => ({
     { id: uid(), nom: "Enfant 2", role: "enfant", naissance: "" },
     { id: uid(), nom: "Enfant 3", role: "enfant", naissance: "" },
   ],
+  actifs: [],
+  detentions: [],
   donations: [],
   av: [],
 });
@@ -44,7 +48,13 @@ let state = load();
 function load() {
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? JSON.parse(raw) : defaultState();
+    const s = raw ? JSON.parse(raw) : defaultState();
+    // rétro-compat : garantit les nouveaux tableaux
+    s.actifs ||= [];
+    s.detentions ||= [];
+    s.donations ||= [];
+    s.av ||= [];
+    return s;
   } catch {
     return defaultState();
   }
@@ -129,6 +139,8 @@ function simulerAvAvant70(montant) {
 //  Rendu — navigation par onglets
 // =============================================================
 const TABS = [
+  { id: "donnees", label: "📥 Données (CSV)" },
+  { id: "organigramme", label: "🗺️ Organigramme & Débrief" },
   { id: "famille", label: "👪 Famille" },
   { id: "donations", label: "🎁 Donations réalisées" },
   { id: "abattements", label: "📊 Abattements dispo." },
@@ -136,7 +148,7 @@ const TABS = [
   { id: "assurancevie", label: "🛡️ Assurance-vie" },
   { id: "baremes", label: "📚 Barèmes" },
 ];
-let currentTab = "famille";
+let currentTab = "donnees";
 
 function render() {
   const app = $("#app");
@@ -155,6 +167,8 @@ function render() {
     })
   );
   ({
+    donnees: renderDonnees,
+    organigramme: renderOrganigramme,
     famille: renderFamille,
     donations: renderDonations,
     abattements: renderAbattements,
@@ -162,6 +176,178 @@ function render() {
     assurancevie: renderAv,
     baremes: renderBaremes,
   })[currentTab]();
+}
+
+function download(name, content, mime = "text/csv;charset=utf-8") {
+  const blob = new Blob(["﻿" + content], { type: mime });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+}
+
+// ---------- Onglet Données (CSV) ----------
+function renderDonnees() {
+  const c = $("#tab-content");
+  const n = (arr) => (arr || []).length;
+  c.innerHTML = `
+    <div class="card">
+      <h2>Import / export CSV</h2>
+      <p class="muted">Remplis un tableur avec tes vraies données, exporte en CSV, puis importe-le ici. L'organigramme et le débrief se génèrent automatiquement.</p>
+      <div class="form-row" style="align-items:center">
+        <button id="dl_template" class="btn primary">⬇ Télécharger le modèle CSV</button>
+        <button id="dl_export" class="btn">⬇ Exporter mes données (CSV)</button>
+        <label class="btn ghost">⬆ Importer un CSV<input id="csv_in" type="file" accept=".csv,text/csv" hidden></label>
+      </div>
+      <div id="csv_msg"></div>
+    </div>
+
+    <div class="card">
+      <h3>Contenu actuel</h3>
+      <div class="chips">
+        <span class="chip">👤 ${n(state.personnes)} personnes</span>
+        <span class="chip">🏦 ${n(state.actifs)} actifs</span>
+        <span class="chip">🔗 ${n(state.detentions)} détentions</span>
+        <span class="chip">🎁 ${n(state.donations)} donations</span>
+        <span class="chip">🛡️ ${n(state.av)} contrats AV</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Comment remplir le modèle</h3>
+      <table class="grid"><thead><tr><th>type</th><th>À quoi ça sert</th><th>Colonnes utiles</th></tr></thead><tbody>
+        <tr><td><b>personne</b></td><td>Chaque membre du foyer</td><td>id, libelle, role (parent/enfant), naissance</td></tr>
+        <tr><td><b>actif</b></td><td>Un bien / SCI / entreprise / compte</td><td>id, libelle, categorie (sci/immobilier/entreprise/liquidites/titres), valeur</td></tr>
+        <tr><td><b>detention</b></td><td>Qui détient quoi</td><td>proprietaire (id perso ou SCI), actif_ref, part_pct, droit (PP/US/NP)</td></tr>
+        <tr><td><b>donation</b></td><td>Donation déjà faite</td><td>proprietaire (donateur), beneficiaire, date, montant</td></tr>
+        <tr><td><b>av</b></td><td>Contrat d'assurance-vie</td><td>id, libelle, proprietaire (souscripteur), valeur, beneficiaire (séparés par ;), avant_70 (oui/non)</td></tr>
+      </tbody></table>
+      <p class="muted small">💡 <b>id</b> = un code court que tu choisis (P1, E1, SCI1…) et que tu réutilises dans les colonnes <b>proprietaire</b>, <b>actif_ref</b>, <b>beneficiaire</b> pour relier les lignes entre elles.</p>
+    </div>`;
+
+  $("#dl_template").addEventListener("click", () => download("modele-patrimoine.csv", templateCSV()));
+  $("#dl_export").addEventListener("click", () => download("mes-donnees-patrimoine.csv", stateToCSV(state)));
+  $("#csv_in").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const imported = csvToState(reader.result);
+        state = imported;
+        save();
+        $("#csv_msg").innerHTML = `<div class="result"><b style="color:var(--accent-2)">✅ Import réussi</b> — ${state.personnes.length} personnes, ${state.actifs.length} actifs, ${state.detentions.length} détentions, ${state.donations.length} donations, ${state.av.length} contrats AV. Va dans l'onglet <b>Organigramme & Débrief</b>.</div>`;
+        renderDonnees();
+      } catch (err) {
+        $("#csv_msg").innerHTML = `<div class="result"><b style="color:var(--danger)">❌ Erreur : ${err.message}</b><br><span class="muted small">Vérifie l'entête et le séparateur (virgule).</span></div>`;
+      }
+    };
+    reader.readAsText(file);
+  });
+}
+
+// ---------- Onglet Organigramme & Débrief ----------
+async function renderOrganigramme() {
+  const c = $("#tab-content");
+  const hasData = (state.actifs || []).length || (state.detentions || []).length || state.donations.length;
+  const d = debrief(state);
+  const eur = (n) => Math.round(n || 0).toLocaleString("fr-FR") + " €";
+
+  const persoRows = state.personnes
+    .map((p) => `<div class="line"><span>${p.nom} <small class="muted">(${p.role})</small></span><b>${eur(d.parPersonne[p.id] || 0)}</b></div>`)
+    .join("");
+  const catRows = Object.entries(d.parCategorie)
+    .map(([k, v]) => `<div class="line"><span>${k}</span><b>${eur(v)}</b></div>`)
+    .join("") || `<div class="muted small">Aucun actif saisi.</div>`;
+
+  c.innerHTML = `
+    ${
+      hasData
+        ? ""
+        : `<div class="card"><b>Aucune donnée patrimoniale.</b> Va dans <b>📥 Données (CSV)</b>, télécharge le modèle, remplis-le et importe-le.</div>`
+    }
+    <div class="grid-2">
+      <div class="card">
+        <h3>💰 Patrimoine par personne</h3>
+        <div class="result">${persoRows}
+          <div class="line total"><span>Total foyer</span><b>${eur(d.patrimoineFoyer)}</b></div>
+        </div>
+        <p class="muted small">Les biens logés dans une SCI ne sont pas recomptés : chacun détient des <i>parts</i> de SCI.</p>
+      </div>
+      <div class="card">
+        <h3>🏦 Répartition par catégorie</h3>
+        <div class="result">${catRows}</div>
+      </div>
+      <div class="card">
+        <h3>🎁 Donations</h3>
+        <div class="result">
+          <div class="line"><span>Total déjà donné</span><b>${eur(d.dejaDonneTotal)}</b></div>
+          <div class="line"><span>Encore rapportable (&lt;15 ans)</span><b>${eur(d.rapportable)}</b></div>
+          <div class="line"><span>Purgé (&gt;15 ans)</span><b>${eur(d.purge)}</b></div>
+          <div class="line total"><span>Capacité de don exonérée restante</span><b>${eur(d.capaciteExoneree)}</b></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>🛡️ Assurance-vie & succession</h3>
+        <div class="result">
+          <div class="line"><span>Capital AV avant 70 ans</span><b>${eur(d.avAvant70)}</b></div>
+          <div class="line"><span>Capital AV après 70 ans</span><b>${eur(d.avApres70)}</b></div>
+          <div class="line total"><span>Droits succession estimés*</span><b>${eur(d.droitsSuccessionEstimes)}</b></div>
+        </div>
+        <p class="muted small">*Estimation simplifiée : décès des 2 parents, patrimoine réparti également entre ${d.nbEnfants} enfant(s), 2 abattements de 100 000 € par enfant. Hors AV. Voir l'onglet Simulateur pour le détail.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>⚰️ Si décès aujourd'hui — droits par enfant</h2>
+      <p class="muted small">Hypothèse : décès des ${d.nbParents} parent(s), patrimoine du foyer (${eur(d.patrimoineFoyer)}) réparti également entre ${d.nbEnfants} enfant(s). Abattement de 100 000 € par parent et par enfant, minoré des donations des 15 dernières années. Hors assurance-vie (fiscalité propre).</p>
+      <table class="grid"><thead><tr>
+        <th>Enfant</th><th>Part reçue</th><th>Abattement dispo.</th><th>Base taxable</th><th>Droits à payer</th><th>Net perçu</th><th>Taux</th>
+      </tr></thead><tbody>
+      ${
+        (d.successionParEnfant || [])
+          .map(
+            (e) => `<tr>
+          <td><b>${e.nom}</b></td>
+          <td>${eur(e.recu)}</td>
+          <td>${eur(e.abattement)}</td>
+          <td>${eur(e.base)}</td>
+          <td style="color:var(--warn)"><b>${eur(e.droits)}</b></td>
+          <td>${eur(e.net)}</td>
+          <td>${(e.tauxEffectif * 100).toFixed(1)} %</td>
+        </tr>`
+          )
+          .join("") || `<tr><td colspan="7" class="muted center">Ajoute des enfants et des actifs.</td></tr>`
+      }
+      </tbody>
+      <tfoot><tr>
+        <th>Total foyer</th><td>${eur(d.patrimoineFoyer)}</td><td></td><td></td>
+        <td style="color:var(--warn)"><b>${eur(d.droitsSuccessionEstimes)}</b></td><td></td><td></td>
+      </tr></tfoot>
+      </table>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <h2 style="margin:0">🗺️ Organigramme patrimonial</h2>
+        <button id="dl_svg" class="btn ghost">⬇ Exporter l'image (SVG)</button>
+      </div>
+      <div id="mermaid-box" class="mermaid-box"><div class="muted">Génération du schéma…</div></div>
+      <p class="muted small">Traits pleins = pleine propriété · pointillés = démembrement (US/NP) · flèches épaisses = donations réalisées.</p>
+    </div>`;
+
+  // Rendu Mermaid (import dynamique depuis CDN)
+  const box = $("#mermaid-box");
+  const def = buildMermaid(state);
+  try {
+    const mermaid = (await import("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs")).default;
+    mermaid.initialize({ startOnLoad: false, theme: "dark", securityLevel: "loose", flowchart: { curve: "basis" } });
+    const { svg } = await mermaid.render("orgchart", def);
+    box.innerHTML = svg;
+    $("#dl_svg").addEventListener("click", () => download("organigramme-patrimoine.svg", box.innerHTML, "image/svg+xml"));
+  } catch (err) {
+    box.innerHTML = `<div class="muted">⚠️ Impossible de charger le moteur graphique (connexion Internet requise pour la 1re fois).<br>Définition du schéma :</div><pre class="code">${def.replace(/</g, "&lt;")}</pre>`;
+  }
 }
 
 // ---------- Onglet Famille ----------

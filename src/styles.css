@@ -116,4 +116,11 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .result .line.total { border-top: 2px solid var(--accent); margin-top: 6px; padding-top: 12px; font-size: 17px; }
 .result .line.total b { color: var(--warn); }
 
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.chip { background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 13px; }
+
+.mermaid-box { background: #0c141c; border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-top: 12px; overflow: auto; text-align: center; min-height: 120px; }
+.mermaid-box svg { max-width: 100%; height: auto; }
+pre.code { text-align: left; background: #0c141c; color: var(--muted); padding: 12px; border-radius: 8px; overflow: auto; font-size: 12px; }
+
 footer { text-align: center; color: var(--muted); font-size: 12px; padding: 24px; border-top: 1px solid var(--line); margin-top: 20px; }
