@@ -1,38 +1,41 @@
 // =============================================================
-//  Synchronisation cloud (Cloudflare Pages Functions + KV)
-//  Fonctionne quand l'app est servie depuis le déploiement
-//  Cloudflare (l'endpoint /api/data existe). Sinon, dégrade
-//  proprement (l'app reste utilisable en localStorage seul).
+//  Synchronisation cloud
+//  Deux modes possibles :
+//   - Cloudflare Pages (Functions) : API relative "/api/data"
+//   - Cloudflare Worker dédié : URL absolue collée par l'utilisateur
+//  L'URL de l'API est configurable et mémorisée dans le navigateur.
 // =============================================================
 
 const PWD_KEY = "patcheck_cloud_pwd";
 const AUTO_KEY = "patcheck_cloud_auto";
-const API = "/api/data";
+const URL_KEY = "patcheck_api_url";
 
 export const getPassword = () => localStorage.getItem(PWD_KEY) || "";
 export const setPassword = (p) => localStorage.setItem(PWD_KEY, p || "");
 export const isAuto = () => localStorage.getItem(AUTO_KEY) === "1";
 export const setAuto = (v) => localStorage.setItem(AUTO_KEY, v ? "1" : "0");
+export const getApiUrl = () => localStorage.getItem(URL_KEY) || "/api/data";
+export const setApiUrl = (u) => localStorage.setItem(URL_KEY, (u || "").trim());
 
-// L'endpoint /api/data existe-t-il ? (présent uniquement sur Cloudflare)
+// L'API répond-elle ? (HEAD non authentifié)
 export async function cloudAvailable() {
   try {
-    const r = await fetch(API, { method: "HEAD" });
-    return r.ok || r.status === 401; // 204 (ok) ou 401 => l'API répond
+    const r = await fetch(getApiUrl(), { method: "HEAD" });
+    return r.ok || r.status === 401 || r.status === 204;
   } catch {
     return false;
   }
 }
 
 export async function cloudLoad(password = getPassword()) {
-  const r = await fetch(API, { headers: { "x-app-password": password } });
+  const r = await fetch(getApiUrl(), { headers: { "x-app-password": password } });
   if (r.status === 401) throw new Error("Mot de passe incorrect");
   if (!r.ok) throw new Error("Erreur cloud (" + r.status + ")");
   return await r.json(); // état sauvegardé, ou null
 }
 
 export async function cloudSave(state, password = getPassword()) {
-  const r = await fetch(API, {
+  const r = await fetch(getApiUrl(), {
     method: "PUT",
     headers: { "x-app-password": password, "content-type": "application/json" },
     body: JSON.stringify(state),

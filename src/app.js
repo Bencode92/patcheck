@@ -260,43 +260,58 @@ function renderDonnees() {
   renderCloudCard();
 }
 
-async function renderCloudCard() {
+function renderCloudCard() {
   const body = $("#cloud-body");
   if (!body) return;
-  const dispo = await sync.cloudAvailable();
-  if (!dispo) {
-    body.innerHTML = `<p class="muted">Cette version est hébergée <b>sans stockage cloud</b> (GitHub Pages / fichier local). Tes données restent dans ce navigateur.<br>Pour la sauvegarde en ligne multi-appareils, ouvre l'app depuis le déploiement <b>Cloudflare</b> (voir README, section Cloudflare).</p>`;
-    return;
-  }
+  const currentUrl = sync.getApiUrl();
+  const isWorker = currentUrl.startsWith("http");
   body.innerHTML = `
-    <p class="muted">Stockage cloud détecté ✅ — tes données peuvent être sauvegardées en ligne (privé, protégé par mot de passe).</p>
+    <p class="muted">Sauvegarde privée (protégée par mot de passe). Colle l'URL de ton <b>Worker Cloudflare</b> (finit par <code>.workers.dev</code>), ton mot de passe, puis teste la connexion.</p>
     <div class="form-row">
-      <label>Mot de passe<input type="password" id="cl_pwd" value="${sync.getPassword()}" placeholder="mot de passe partagé"></label>
+      <label>URL du Worker (Cloudflare)<input type="text" id="cl_url" value="${isWorker ? currentUrl : ""}" placeholder="https://patcheck.xxx.workers.dev"></label>
+    </div>
+    <div class="form-row">
+      <label>Mot de passe<input type="password" id="cl_pwd" value="${sync.getPassword()}" placeholder="ton APP_PASSWORD Cloudflare"></label>
       <label style="flex-direction:row;align-items:center;gap:8px;min-width:200px">
         <input type="checkbox" id="cl_auto" ${sync.isAuto() ? "checked" : ""} style="width:auto"> Sauvegarde automatique
       </label>
     </div>
     <div class="form-row">
+      <button id="cl_test" class="btn">🔌 Tester la connexion</button>
       <button id="cl_save" class="btn primary">☁️ Sauvegarder maintenant</button>
       <button id="cl_load" class="btn">⬇ Charger depuis le cloud</button>
     </div>
     <div id="cl_status" class="muted small"></div>`;
 
   const status = (msg, color = "var(--muted)") => ($("#cl_status").innerHTML = `<span style="color:${color}">${msg}</span>`);
+  const syncFields = () => {
+    const u = $("#cl_url").value.trim();
+    sync.setApiUrl(u || "/api/data");
+    sync.setPassword($("#cl_pwd").value);
+  };
   cloudStatusCb = (s, info) => {
     if (s === "pending") status("💾 sauvegarde en cours…");
     else if (s === "saved") status("✅ sauvegardé " + (info ? "à " + new Date(info).toLocaleTimeString("fr-FR") : ""), "var(--accent-2)");
     else if (s === "error") status("⚠️ " + info, "var(--danger)");
   };
-  $("#cl_pwd").addEventListener("input", (e) => sync.setPassword(e.target.value));
+  $("#cl_url").addEventListener("input", syncFields);
+  $("#cl_pwd").addEventListener("input", syncFields);
   $("#cl_auto").addEventListener("change", (e) => { sync.setAuto(e.target.checked); status(e.target.checked ? "auto-sauvegarde activée" : "auto-sauvegarde désactivée"); });
+  $("#cl_test").addEventListener("click", async () => {
+    syncFields();
+    status("test en cours…");
+    const ok = await sync.cloudAvailable();
+    if (!ok) { status("❌ pas de réponse — vérifie l'URL du Worker (déployé ?)", "var(--danger)"); return; }
+    try { await sync.cloudLoad(); status("✅ connexion OK, mot de passe accepté", "var(--accent-2)"); }
+    catch (e) { status(e.message.includes("passe") ? "🔌 Worker joignable mais ❌ " + e.message : "⚠️ " + e.message, "var(--warn)"); }
+  });
   $("#cl_save").addEventListener("click", async () => {
-    sync.setPassword($("#cl_pwd").value);
+    syncFields();
     try { const r = await sync.cloudSave(state); status("✅ sauvegardé à " + new Date(r.savedAt).toLocaleTimeString("fr-FR"), "var(--accent-2)"); }
     catch (e) { status("❌ " + e.message, "var(--danger)"); }
   });
   $("#cl_load").addEventListener("click", async () => {
-    sync.setPassword($("#cl_pwd").value);
+    syncFields();
     try {
       const data = await sync.cloudLoad();
       if (!data) { status("Aucune donnée en ligne pour l'instant.", "var(--warn)"); return; }
