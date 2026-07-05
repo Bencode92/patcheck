@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=5";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=5";
-import { buildMermaid, debrief } from "./graph.js?v=5";
-import * as sync from "./sync.js?v=5";
+} from "./data.js?v=6";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=6";
+import { buildMermaid, debrief } from "./graph.js?v=6";
+import * as sync from "./sync.js?v=6";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -24,8 +24,9 @@ function ageAu(naissance, dateRef = new Date()) {
   if (m < 0 || (m === 0 && dateRef.getDate() < n.getDate())) age--;
   return age;
 }
-// Âge d'une personne : âge saisi en priorité, sinon calculé depuis la date
+// Âge d'une personne : année de naissance en priorité, puis âge saisi, puis date
 function ageDe(p) {
+  if (p?.annee) return new Date().getFullYear() - Number(p.annee);
   if (p?.age != null && p.age !== "") return Number(p.age);
   return p?.naissance ? ageAu(p.naissance) : null;
 }
@@ -503,7 +504,7 @@ function renderFamille() {
       <h2>Composition du foyer</h2>
       <p class="muted">Renseigne les personnes. Tu peux saisir directement l'<b>âge</b> (suffisant pour le démembrement, art. 669 CGI) ; la date de naissance est facultative.</p>
       <table class="grid">
-        <thead><tr><th>Nom</th><th>Rôle</th><th>Âge</th><th>Naissance (option.)</th><th></th></tr></thead>
+        <thead><tr><th>Nom</th><th>Rôle</th><th>Année de naissance</th><th>Âge</th><th></th></tr></thead>
         <tbody>
         ${state.personnes
           .map(
@@ -517,8 +518,8 @@ function renderFamille() {
                 <option value="petit_enfant" ${p.role === "petit_enfant" ? "selected" : ""}>Petit-enfant</option>
               </select>
             </td>
-            <td><input class="age" type="number" min="0" max="120" placeholder="ans" value="${p.age ?? (p.naissance ? ageAu(p.naissance) : "")}" style="max-width:80px"></td>
-            <td><input type="date" class="naissance" value="${p.naissance || ""}"></td>
+            <td><input class="annee" type="number" min="1900" max="${new Date().getFullYear()}" placeholder="1973" value="${p.annee ?? ""}" style="max-width:100px"></td>
+            <td class="agecalc">${ageDe(p) != null ? ageDe(p) + " ans" : "—"}</td>
             <td><button class="del danger-link">✕</button></td>
           </tr>`
           )
@@ -538,15 +539,13 @@ function renderFamille() {
       personne(id).role = e.target.value;
       save();
     });
-    $(".age", tr).addEventListener("input", (e) => {
+    $(".annee", tr).addEventListener("input", (e) => {
       const v = e.target.value;
-      personne(id).age = v === "" ? null : Number(v);
+      personne(id).annee = v === "" ? null : Number(v);
       save();
-    });
-    $(".naissance", tr).addEventListener("change", (e) => {
-      personne(id).naissance = e.target.value;
-      personne(id).age = null; // la date prend le dessus si renseignée
-      save();
+      // met à jour l'âge affiché sans re-render (garde le focus)
+      const a = ageDe(personne(id));
+      $(".agecalc", tr).textContent = a != null ? a + " ans" : "—";
     });
     $(".del", tr).addEventListener("click", () => {
       state.personnes = state.personnes.filter((p) => p.id !== id);
