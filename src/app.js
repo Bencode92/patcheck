@@ -1042,13 +1042,15 @@ document.addEventListener("DOMContentLoaded", async () => {
         const remote = await sync.cloudLoad();
         const localTs = state._ts || 0;
         const remoteTs = (remote && remote._ts) || 0;
-        if (remote && remoteTs >= localTs) {
+        if (remote && remoteTs > localTs) {
+          // le cloud est strictement plus récent -> on l'adopte
           state = remote;
           localStorage.setItem(KEY, JSON.stringify(state));
         } else if (localTs > remoteTs && sync.isAuto()) {
-          // local plus récent : on pousse pour rattraper le cloud
+          // local plus récent -> on pousse pour rattraper le cloud
           sync.cloudSave(state).catch(() => {});
         }
+        // égalité (ex : anciennes données sans horodatage) -> on garde le local (jamais d'écrasement)
       }
     } catch { /* silencieux : on garde la version locale */ }
   }
