@@ -1,7 +1,7 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE } from "./data.js?v=14";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE } from "./data.js?v=15";
 
 // Taux d'exonération Dutreil (art. 787 B) sur les titres de société éligibles
 const DUTREIL_EXO = 0.75;
@@ -204,6 +204,31 @@ export function debrief(state) {
     });
   });
 
+  // ------- Scénarios de transmission aux enfants (ordre des décès / régime) -------
+  // Hypothèse couple (2 parents). Estimation ligne directe, hors assurance-vie.
+  let scenarios = null;
+  if (enfants.length) {
+    const n = enfants.length;
+    const dLD = (b) => calculDroits(Math.max(0, b), BAREME_LIGNE_DIRECTE);
+    const consommeEnf = (enf) =>
+      donations.filter((d) => d.beneficiaireId === enf.id && anneesEcoulees(d.date) < DELAI_RAPPEL_ANS).reduce((s, d) => s + d.montant, 0);
+    const build = (fnDroits) => {
+      const pe = enfants.map((enf) => ({ nom: enf.nom, recu: patrimoineTaxable / n, droits: fnDroits(enf) }));
+      return { parEnfant: pe, total: pe.reduce((s, e) => s + e.droits, 0) };
+    };
+    scenarios = {
+      // 2 abattements (100k × 2 parents), une seule transmission
+      simultane: build((enf) => dLD(patrimoineTaxable / n - Math.max(0, ABATTEMENTS.enfant * 2 - consommeEnf(enf)))),
+      // attribution intégrale : tout au conjoint au 1er décès, enfants au 2nd -> 1 seul abattement
+      attribution: build((enf) => dLD(patrimoineTaxable / n - Math.max(0, ABATTEMENTS.enfant - consommeEnf(enf)))),
+      // transmission à chaque décès : 2 assiettes de P/2 avec 100k chacune (tranches plus basses)
+      progressif: build((enf) => {
+        const demi = patrimoineTaxable / 2 / n;
+        return dLD(demi - Math.max(0, ABATTEMENTS.enfant - consommeEnf(enf))) + dLD(demi - ABATTEMENTS.enfant);
+      }),
+    };
+  }
+
   // ------- Reste à faire / pistes d'optimisation -------
   const reco = [];
   const eur = (n) => Math.round(n).toLocaleString("fr-FR") + " €";
@@ -246,6 +271,7 @@ export function debrief(state) {
     exonerationDutreil,
     totalDettes,
     regime: state.regime || "",
+    scenarios,
     reco,
     parPersonne,
     parCategorie,

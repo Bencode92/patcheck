@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=14";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=14";
-import { buildMermaid, debrief } from "./graph.js?v=14";
-import * as sync from "./sync.js?v=14";
+} from "./data.js?v=15";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=15";
+import { buildMermaid, debrief } from "./graph.js?v=15";
+import * as sync from "./sync.js?v=15";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -230,6 +230,13 @@ function exporterResume() {
   push("SI DÉCÈS AUJOURD'HUI — PAR ENFANT", "Part reçue", "Abattement", "Base taxable", "Droits à payer", "Net perçu");
   (d.successionParEnfant || []).forEach((e) => push(e.nom, euro(e.recu), euro(e.abattement), euro(e.base), euro(e.droits), euro(e.net)));
   push("TOTAL DROITS", "", "", "", euro(d.droitsSuccessionEstimes), "");
+  if (d.scenarios) {
+    push("");
+    push("SCÉNARIOS DE TRANSMISSION", "Total droits enfants");
+    push("Communauté universelle + attribution intégrale (1 abattement)", euro(d.scenarios.attribution.total));
+    push("Transmission à chaque décès (2 abattements)", euro(d.scenarios.progressif.total));
+    push("Décès simultané (référence)", euro(d.scenarios.simultane.total));
+  }
   push("");
   push("ASSURANCE-VIE", "Banque", "Souscripteur(s)", "Capital", "Régime primes", "Bénéficiaires");
   (state.av || []).forEach((a) => {
@@ -535,6 +542,31 @@ async function renderOrganigramme() {
       </tr></tfoot>
       </table>
     </div>
+
+    ${
+      d.scenarios
+        ? (() => {
+            const s = d.scenarios;
+            const match = d.regime === "universelle_attribution" ? "attribution" : (d.regime && d.regime !== "" ? "progressif" : null);
+            const best = ["attribution", "progressif", "simultane"].reduce((a, b) => (s[b].total < s[a].total ? b : a));
+            const row = (key, titre, sous) => `<tr ${key === match ? 'style="background:var(--accent-soft)"' : ""}>
+              <td><b>${titre}</b><br><span class="muted small">${sous}</span></td>
+              <td style="color:var(--warn);white-space:nowrap"><b>${eur(s[key].total)}</b></td>
+              <td>${key === match ? '<span class="badge warn">votre régime</span> ' : ""}${key === best ? '<span class="badge ok">le moins coûteux</span>' : ""}</td>
+            </tr>`;
+            return `<div class="card">
+              <h2>⚖️ Scénarios de transmission aux enfants</h2>
+              <p class="muted small">Selon l'ordre des décès et le régime matrimonial, le coût fiscal total pour les enfants change fortement. Estimation ligne directe sur l'assiette taxable (${eur(d.patrimoineTaxable)}), hors assurance-vie.</p>
+              <table class="grid"><thead><tr><th>Scénario</th><th>Total droits enfants</th><th></th></tr></thead><tbody>
+                ${row("attribution", "Communauté universelle + attribution intégrale", "Tout au conjoint au 1er décès (0 droit), enfants héritent au 2nd → 1 seul abattement de 100 000 €")}
+                ${row("progressif", "Transmission à chaque décès", "Moitié au 1er décès, moitié au 2nd → 2 abattements + tranches basses")}
+                ${row("simultane", "Décès simultané des 2 parents", "Référence : 2 abattements, une seule transmission")}
+              </tbody></table>
+              <p class="muted small">💡 L'attribution intégrale <b>protège le conjoint</b> mais coûte le plus aux enfants (un seul abattement, base pleine). Transmettre progressivement (ou anticiper par donations démembrées) minimise les droits. À arbitrer avec le notaire.</p>
+            </div>`;
+          })()
+        : ""
+    }
 
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
