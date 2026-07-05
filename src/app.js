@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=11";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=11";
-import { buildMermaid, debrief } from "./graph.js?v=11";
-import * as sync from "./sync.js?v=11";
+} from "./data.js?v=12";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=12";
+import { buildMermaid, debrief } from "./graph.js?v=12";
+import * as sync from "./sync.js?v=12";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -418,7 +418,7 @@ async function renderOrganigramme() {
                 return `<tr>
                   <td><b>${a.libelle || a.id}</b></td>
                   <td>${a.etablissement || "—"}</td>
-                  <td>${personne(a.souscripteurId)?.nom || a.souscripteurId || "?"}</td>
+                  <td>${personne(a.souscripteurId)?.nom || a.souscripteurId || "?"}${a.cosouscripteurId ? " & " + (personne(a.cosouscripteurId)?.nom || "") + " <span class=\"muted small\">(co-adh.)</span>" : ""}</td>
                   <td>${a.annee || "—"}</td>
                   <td>${eur(a.montant)}</td>
                   <td>${a.avant70 ? "avant 70 ans" : "après 70 ans"}</td>
@@ -957,6 +957,7 @@ function renderAv() {
             <label>Libellé<input class="av_lib" value="${a.libelle || ""}" placeholder="ex : Contrat retraite"></label>
             <label>Banque / Assureur<input class="av_etab" value="${a.etablissement || ""}" placeholder="ex : Linxea, BNP…"></label>
             <label>Souscripteur<select class="av_sous">${opt(state.personnes.map((p) => [p.id, p.nom]), a.souscripteurId)}</select></label>
+            <label>Co-souscripteur (co-adhésion)<select class="av_cosous"><option value="" ${!a.cosouscripteurId ? "selected" : ""}>— aucun —</option>${opt(state.personnes.map((p) => [p.id, p.nom]), a.cosouscripteurId)}</select></label>
           </div>
           <div class="form-row">
             <label>Capital (€)<input class="av_mnt" value="${a.montant || ""}" inputmode="numeric"></label>
@@ -1000,6 +1001,7 @@ function renderAv() {
     $(".av_lib", row).addEventListener("input", (e) => { AV[i].libelle = e.target.value; save(); });
     $(".av_etab", row).addEventListener("input", (e) => { AV[i].etablissement = e.target.value; save(); });
     $(".av_sous", row).addEventListener("change", (e) => { AV[i].souscripteurId = e.target.value; save(); });
+    $(".av_cosous", row).addEventListener("change", (e) => { AV[i].cosouscripteurId = e.target.value || null; save(); });
     $(".av_mnt", row).addEventListener("input", (e) => { AV[i].montant = parseNum(e.target.value); save(); });
     $(".av_an", row).addEventListener("input", (e) => { AV[i].annee = e.target.value === "" ? null : Number(e.target.value); save(); });
     $(".av_av70", row).addEventListener("change", (e) => { AV[i].avant70 = e.target.value === "oui"; save(); });

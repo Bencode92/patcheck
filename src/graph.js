@@ -1,7 +1,7 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE } from "./data.js?v=11";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE } from "./data.js?v=12";
 
 // Taux d'exonération Dutreil (art. 787 B) sur les titres de société éligibles
 const DUTREIL_EXO = 0.75;
@@ -55,6 +55,7 @@ export function buildMermaid(state) {
   (state.av || []).forEach((a) => {
     L.push(`  ${a.id}[/"🛡️ ${clean(a.libelle)}<br/><b>${eur0(a.montant)}</b><br/><small>${a.avant70 ? "avant 70 ans" : "après 70 ans"}</small>"/]:::av`);
     if (a.souscripteurId) L.push(`  ${a.souscripteurId} --> ${a.id}`);
+    if (a.cosouscripteurId) L.push(`  ${a.cosouscripteurId} -->|co-adh.| ${a.id}`);
     (a.beneficiaires || []).forEach((b) => L.push(`  ${a.id} -.->|bénéf.| ${b}`));
   });
 
