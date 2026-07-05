@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=3";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=3";
-import { buildMermaid, debrief } from "./graph.js?v=3";
-import * as sync from "./sync.js?v=3";
+} from "./data.js?v=4";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=4";
+import { buildMermaid, debrief } from "./graph.js?v=4";
+import * as sync from "./sync.js?v=4";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -64,6 +64,7 @@ function load() {
 }
 let cloudStatusCb = null;
 function save() {
+  state._ts = Date.now(); // horodatage : sert à savoir quelle version est la plus récente
   localStorage.setItem(KEY, JSON.stringify(state));
   sync.scheduleAutoSave(() => state, (s, info) => cloudStatusCb?.(s, info));
 }
@@ -1033,12 +1034,21 @@ function importData(file) {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-  // Au démarrage : si le cloud est configuré, on récupère la version en ligne.
+  // Au démarrage : si le cloud est configuré, on garde la version LA PLUS RÉCENTE
+  // (comparaison d'horodatage) — jamais écraser des saisies locales plus neuves.
   if (sync.getPassword()) {
     try {
       if (await sync.cloudAvailable()) {
         const remote = await sync.cloudLoad();
-        if (remote) { state = remote; localStorage.setItem(KEY, JSON.stringify(state)); }
+        const localTs = state._ts || 0;
+        const remoteTs = (remote && remote._ts) || 0;
+        if (remote && remoteTs >= localTs) {
+          state = remote;
+          localStorage.setItem(KEY, JSON.stringify(state));
+        } else if (localTs > remoteTs && sync.isAuto()) {
+          // local plus récent : on pousse pour rattraper le cloud
+          sync.cloudSave(state).catch(() => {});
+        }
       }
     } catch { /* silencieux : on garde la version locale */ }
   }

@@ -12,7 +12,7 @@ const URL_KEY = "patcheck_api_url";
 
 export const getPassword = () => localStorage.getItem(PWD_KEY) || "";
 export const setPassword = (p) => localStorage.setItem(PWD_KEY, p || "");
-export const isAuto = () => localStorage.getItem(AUTO_KEY) === "1";
+export const isAuto = () => localStorage.getItem(AUTO_KEY) !== "0"; // activée par défaut
 export const setAuto = (v) => localStorage.setItem(AUTO_KEY, v ? "1" : "0");
 export const getApiUrl = () => localStorage.getItem(URL_KEY) || "/api/data";
 export const setApiUrl = (u) => localStorage.setItem(URL_KEY, (u || "").trim());
