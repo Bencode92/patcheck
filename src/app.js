@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=7";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=7";
-import { buildMermaid, debrief } from "./graph.js?v=7";
-import * as sync from "./sync.js?v=7";
+} from "./data.js?v=8";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=8";
+import { buildMermaid, debrief } from "./graph.js?v=8";
+import * as sync from "./sync.js?v=8";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -26,10 +26,11 @@ function ageAu(naissance, dateRef = new Date()) {
 }
 // Âge d'une personne : date complète d'abord (exact), sinon année seule, sinon âge saisi
 function ageDe(p) {
-  if (p?.naissance) return ageAu(p.naissance);
-  if (p?.annee) return new Date().getFullYear() - Number(p.annee);
-  if (p?.age != null && p.age !== "") return Number(p.age);
-  return null;
+  let a = null;
+  if (p?.naissance) a = ageAu(p.naissance);
+  else if (p?.annee) a = new Date().getFullYear() - Number(p.annee);
+  else if (p?.age != null && p.age !== "") a = Number(p.age);
+  return Number.isFinite(a) ? a : null; // évite d'afficher "NaN" sur une date incomplète
 }
 function anneesEcoulees(dateStr) {
   const d = new Date(dateStr);
@@ -545,11 +546,14 @@ function renderFamille() {
       const a = ageDe(personne(id));
       $(".agecalc", tr).textContent = a != null ? a + " ans" : "—";
     };
-    $(".naissance", tr).addEventListener("change", (e) => {
-      personne(id).naissance = e.target.value;
-      save();
-      majAge();
-    });
+    // "input" ET "change" -> l'âge se met à jour en direct pendant la saisie
+    ["input", "change"].forEach((ev) =>
+      $(".naissance", tr).addEventListener(ev, (e) => {
+        personne(id).naissance = e.target.value;
+        save();
+        majAge();
+      })
+    );
     $(".annee", tr).addEventListener("input", (e) => {
       const v = e.target.value;
       personne(id).annee = v === "" ? null : Number(v);
