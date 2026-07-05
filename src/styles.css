@@ -123,6 +123,16 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .result .line.total { border-top: 2px solid var(--accent); margin-top: 6px; padding-top: 12px; font-size: 17px; }
 .result .line.total b { color: var(--warn); }
 
+.asset-card { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; background: var(--panel-2); }
+.asset-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px; }
+.asset-head input, .asset-head select { flex: 1; min-width: 120px; }
+.asset-head .danger-link { flex: 0; font-size: 18px; }
+.asset-sub { border-top: 1px dashed var(--line); padding-top: 10px; margin-top: 8px; }
+.sub-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.mini-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
+.mini-row select, .mini-row input { flex: 1; min-width: 100px; }
+.btn.small { padding: 5px 12px; font-size: 13px; margin-top: 4px; }
+
 .av-edit { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; background: var(--panel-2); }
 .benef-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .benef-chk { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; cursor: pointer; }

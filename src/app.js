@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=9";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=9";
-import { buildMermaid, debrief } from "./graph.js?v=9";
-import * as sync from "./sync.js?v=9";
+} from "./data.js?v=10";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=10";
+import { buildMermaid, debrief } from "./graph.js?v=10";
+import * as sync from "./sync.js?v=10";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -593,98 +593,125 @@ const actifList = () => (state.actifs || []).map((a) => [a.id, (a.libelle || a.i
 function renderPatrimoine() {
   const c = $("#tab-content");
   const A = state.actifs || [], D = state.detentions || [], X = state.dettes || [];
+  const yr = new Date().getFullYear();
+  const droits = [["PP", "Pleine propriété"], ["US", "Usufruit"], ["NP", "Nue-propriété"]];
+  const detenteursDe = (aid) => D.map((d, i) => ({ d, i })).filter((o) => o.d.actifRef === aid);
+  const dettesDe = (aid) => X.map((x, i) => ({ x, i })).filter((o) => o.x.cible === aid);
+
+  const assetCard = (a, ai) => `
+    <div class="asset-card">
+      <div class="asset-head">
+        <select class="f_cat" data-ai="${ai}">${opt(CATEGORIES, a.categorie)}</select>
+        <input class="f_lib" data-ai="${ai}" placeholder="Libellé (ex : Résidence principale)" value="${a.libelle || ""}">
+        <input class="f_val" data-ai="${ai}" inputmode="numeric" placeholder="Valeur €" value="${a.valeur || ""}" style="max-width:130px">
+        <input class="f_an" data-ai="${ai}" type="number" min="1900" max="${yr}" placeholder="Année acquis." value="${a.annee ?? ""}" style="max-width:120px">
+        ${a.categorie === "entreprise" ? `<label class="benef-chk"><input type="checkbox" class="f_dut" data-ai="${ai}" ${a.dutreil ? "checked" : ""}> Dutreil −75%</label>` : ""}
+        <button class="danger-link" data-del="actif" data-ai="${ai}" title="Supprimer ce bien">🗑</button>
+      </div>
+
+      <div class="asset-sub">
+        <div class="sub-title">🔗 Détenteurs <span class="muted small">— qui possède, quelle part, quel droit (démembrement)</span></div>
+        ${detenteursDe(a.id).map(({ d, i }) => `
+          <div class="mini-row">
+            <select class="dd_prop" data-di="${i}">${opt(ownerList(), d.proprietaire)}</select>
+            <input class="dd_part" data-di="${i}" inputmode="numeric" value="${d.part ?? ""}" placeholder="%" style="max-width:70px"><span class="muted">%</span>
+            <select class="dd_droit" data-di="${i}">${opt(droits, d.droit)}</select>
+            <button class="danger-link" data-del="detention" data-di="${i}">✕</button>
+          </div>`).join("") || `<div class="muted small">Aucun détenteur pour l'instant.</div>`}
+        <button class="btn small" data-add="detenteur" data-ai="${ai}">+ détenteur</button>
+      </div>
+
+      <div class="asset-sub">
+        <div class="sub-title">💳 Dette liée <span class="muted small">— emprunt adossé à ce bien (réduit la valeur nette transmise)</span></div>
+        ${dettesDe(a.id).map(({ x, i }) => `
+          <div class="mini-row">
+            <input class="xx_lib" data-xi="${i}" value="${x.libelle || ""}" placeholder="ex : Crédit ${a.libelle || "ce bien"}">
+            <input class="xx_val" data-xi="${i}" inputmode="numeric" value="${x.montant || ""}" placeholder="Capital restant dû €">
+            <button class="danger-link" data-del="dette" data-xi="${i}">✕</button>
+          </div>`).join("") || `<div class="muted small">Aucune dette sur ce bien.</div>`}
+        <button class="btn small" data-add="dette" data-ai="${ai}">+ dette sur ce bien</button>
+      </div>
+    </div>`;
+
   c.innerHTML = `
     <div class="card">
-      <h2>🏦 Actifs</h2>
-      <p class="muted small">Chaque bien, SCI, société ou compte. Le montant est la valeur vénale (nette de dette si tu ne saisis pas la dette à part).</p>
-      <table class="grid"><thead><tr><th>Libellé</th><th>Catégorie</th><th>Valeur (€)</th><th>Dutreil</th><th></th></tr></thead>
-      <tbody>
-      ${A.map((a, i) => `<tr data-i="${i}">
-        <td><input class="a_lib" value="${a.libelle || ""}"></td>
-        <td><select class="a_cat">${opt(CATEGORIES, a.categorie)}</select></td>
-        <td><input class="a_val" value="${a.valeur || ""}" inputmode="numeric"></td>
-        <td style="text-align:center">${a.categorie === "entreprise" ? `<input type="checkbox" class="a_dut" ${a.dutreil ? "checked" : ""}>` : "—"}</td>
-        <td><button class="a_del danger-link">✕</button></td>
-      </tr>`).join("") || `<tr><td colspan="5" class="muted center">Aucun actif. Ajoute-en un ci-dessous.</td></tr>`}
-      </tbody></table>
-      <button id="a_add" class="btn">+ Ajouter un actif</button>
+      <h2>🏦 Patrimoine — biens, détention & dettes</h2>
+      <p class="muted small">Un bloc par bien (immobilier, SCI, entreprise, compte…). Sous chaque bien : <b>qui le détient</b> (avec démembrement) et <b>la dette qui lui est liée</b>. Pour une SCI qui détient un immeuble, ajoute la SCI comme détenteur de l'immeuble.</p>
+      ${A.map(assetCard).join("") || `<p class="muted">Aucun bien pour l'instant. Ajoute ton premier bien ci-dessous.</p>`}
+      <button class="btn primary" data-add="actif">+ Ajouter un bien</button>
     </div>
+    <p class="muted small center">💾 Enregistrement automatique (local + cloud). Résultat dans <b>🏠 Résumé patrimonial</b>.</p>`;
 
-    <div class="card">
-      <h2>🔗 Qui détient quoi</h2>
-      <p class="muted small">Relie une personne (ou une SCI) à un actif : sa quote-part et son droit — pleine propriété, usufruit ou nue-propriété (démembrement).</p>
-      <table class="grid"><thead><tr><th>Propriétaire</th><th>Actif détenu</th><th>Part %</th><th>Droit</th><th></th></tr></thead>
-      <tbody>
-      ${D.map((d, i) => `<tr data-i="${i}">
-        <td><select class="d_prop">${opt(ownerList(), d.proprietaire)}</select></td>
-        <td><select class="d_act">${opt(actifList(), d.actifRef)}</select></td>
-        <td><input class="d_part" value="${d.part ?? ""}" inputmode="numeric" style="max-width:80px"></td>
-        <td><select class="d_droit">${opt([["PP", "Pleine propriété"], ["US", "Usufruit"], ["NP", "Nue-propriété"]], d.droit)}</select></td>
-        <td><button class="d_del danger-link">✕</button></td>
-      </tr>`).join("") || `<tr><td colspan="5" class="muted center">Aucune détention. Ajoute d'abord des actifs, puis relie-les.</td></tr>`}
-      </tbody></table>
-      <button id="d_add" class="btn" ${A.length ? "" : "disabled"}>+ Ajouter une détention</button>
-    </div>
-
-    <div class="card">
-      <h2>💳 Dettes</h2>
-      <p class="muted small">Emprunts / passifs. Ils réduisent le patrimoine net et l'assiette taxable. « Grève » = l'actif ou la personne concernés.</p>
-      <table class="grid"><thead><tr><th>Libellé</th><th>Montant dû (€)</th><th>Grève</th><th></th></tr></thead>
-      <tbody>
-      ${X.map((x, i) => `<tr data-i="${i}">
-        <td><input class="x_lib" value="${x.libelle || ""}"></td>
-        <td><input class="x_val" value="${x.montant || ""}" inputmode="numeric"></td>
-        <td><select class="x_cible">${opt(ownerList(), x.cible)}</select></td>
-        <td><button class="x_del danger-link">✕</button></td>
-      </tr>`).join("") || `<tr><td colspan="4" class="muted center">Aucune dette.</td></tr>`}
-      </tbody></table>
-      <button id="x_add" class="btn">+ Ajouter une dette</button>
-    </div>
-
-    <p class="muted small center">💾 Tout est enregistré automatiquement (et synchronisé dans le cloud si activé). Va dans <b>🗺️ Organigramme & Débrief</b> pour voir le résultat.</p>`;
-
-  // --- Câblage par DÉLÉGATION (robuste : un seul gestionnaire par type) ---
-  const root = c;
-  const rowIndex = (el) => { const tr = el.closest("tr[data-i]"); return tr ? +tr.dataset.i : -1; };
-
-  root.onclick = (e) => {
-    const btn = e.target.closest("button");
-    if (!btn) return;
-    if (btn.id === "a_add") { A.push({ id: uid(), libelle: "", categorie: "immobilier", valeur: 0, dutreil: false }); state.actifs = A; save(); renderPatrimoine(); return; }
-    if (btn.id === "d_add") { D.push({ proprietaire: state.personnes[0]?.id || "", actifRef: A[0]?.id || "", part: 100, droit: "PP" }); state.detentions = D; save(); renderPatrimoine(); return; }
-    if (btn.id === "x_add") { X.push({ id: uid(), libelle: "", montant: 0, cible: ownerList()[0]?.[0] || "" }); state.dettes = X; save(); renderPatrimoine(); return; }
-    const i = rowIndex(btn);
-    if (i < 0) return;
-    if (btn.classList.contains("a_del")) { A.splice(i, 1); save(); renderPatrimoine(); }
-    else if (btn.classList.contains("d_del")) { D.splice(i, 1); save(); renderPatrimoine(); }
-    else if (btn.classList.contains("x_del")) { X.splice(i, 1); save(); renderPatrimoine(); }
+  // --- Câblage par DÉLÉGATION (indices portés par data-attributes -> fiable) ---
+  c.onclick = (e) => {
+    const add = e.target.closest("[data-add]");
+    if (add) {
+      const kind = add.dataset.add;
+      if (kind === "actif") {
+        A.push({ id: uid(), libelle: "", categorie: "immobilier", valeur: 0, annee: null, dutreil: false });
+        state.actifs = A;
+      } else if (kind === "detenteur") {
+        const a = A[+add.dataset.ai];
+        D.push({ proprietaire: state.personnes.find((p) => p.role === "parent")?.id || state.personnes[0]?.id || "", actifRef: a.id, part: 100, droit: "PP" });
+        state.detentions = D;
+      } else if (kind === "dette") {
+        const a = A[+add.dataset.ai];
+        X.push({ id: uid(), libelle: "", montant: 0, cible: a.id });
+        state.dettes = X;
+      }
+      save(); renderPatrimoine(); return;
+    }
+    const del = e.target.closest("[data-del]");
+    if (del) {
+      const kind = del.dataset.del;
+      if (kind === "actif") {
+        const removed = A[+del.dataset.ai];
+        A.splice(+del.dataset.ai, 1);
+        state.actifs = A;
+        state.detentions = D.filter((d) => d.actifRef !== removed.id); // nettoie détentions liées
+        state.dettes = X.filter((x) => x.cible !== removed.id);          // et dettes liées
+      } else if (kind === "detention") {
+        D.splice(+del.dataset.di, 1);
+      } else if (kind === "dette") {
+        X.splice(+del.dataset.xi, 1);
+      }
+      save(); renderPatrimoine(); return;
+    }
   };
 
-  root.oninput = (e) => {
-    const t = e.target, i = rowIndex(t);
-    if (i < 0) return;
-    if (t.classList.contains("a_lib")) A[i].libelle = t.value;
-    else if (t.classList.contains("a_val")) A[i].valeur = parseNum(t.value);
-    else if (t.classList.contains("d_part")) D[i].part = parseNum(t.value);
-    else if (t.classList.contains("x_lib")) X[i].libelle = t.value;
-    else if (t.classList.contains("x_val")) X[i].montant = parseNum(t.value);
-    else return;
-    save();
+  c.oninput = (e) => {
+    const t = e.target;
+    if (t.dataset.ai != null) {
+      const a = A[+t.dataset.ai];
+      if (t.classList.contains("f_lib")) a.libelle = t.value;
+      else if (t.classList.contains("f_val")) a.valeur = parseNum(t.value);
+      else if (t.classList.contains("f_an")) a.annee = t.value === "" ? null : Number(t.value);
+      else return;
+      save();
+    } else if (t.dataset.di != null && t.classList.contains("dd_part")) {
+      D[+t.dataset.di].part = parseNum(t.value); save();
+    } else if (t.dataset.xi != null) {
+      const x = X[+t.dataset.xi];
+      if (t.classList.contains("xx_lib")) x.libelle = t.value;
+      else if (t.classList.contains("xx_val")) x.montant = parseNum(t.value);
+      else return;
+      save();
+    }
   };
 
-  root.onchange = (e) => {
-    const t = e.target, i = rowIndex(t);
-    if (i < 0) return;
-    let reRender = false;
-    if (t.classList.contains("a_cat")) { A[i].categorie = t.value; reRender = true; }
-    else if (t.classList.contains("a_dut")) A[i].dutreil = t.checked;
-    else if (t.classList.contains("d_prop")) D[i].proprietaire = t.value;
-    else if (t.classList.contains("d_act")) D[i].actifRef = t.value;
-    else if (t.classList.contains("d_droit")) D[i].droit = t.value;
-    else if (t.classList.contains("x_cible")) X[i].cible = t.value;
-    else return;
-    save();
-    if (reRender) renderPatrimoine();
+  c.onchange = (e) => {
+    const t = e.target;
+    if (t.dataset.ai != null) {
+      const a = A[+t.dataset.ai];
+      if (t.classList.contains("f_cat")) { a.categorie = t.value; save(); renderPatrimoine(); }
+      else if (t.classList.contains("f_dut")) { a.dutreil = t.checked; save(); }
+    } else if (t.dataset.di != null) {
+      const d = D[+t.dataset.di];
+      if (t.classList.contains("dd_prop")) d.proprietaire = t.value;
+      else if (t.classList.contains("dd_droit")) d.droit = t.value;
+      else return;
+      save();
+    }
   };
 }
 
@@ -920,7 +947,8 @@ function renderAv() {
           </div>
           <div class="form-row">
             <label>Capital (€)<input class="av_mnt" value="${a.montant || ""}" inputmode="numeric"></label>
-            <label>Régime<select class="av_av70">${opt([["oui", "Avant 70 ans"], ["non", "Après 70 ans"]], a.avant70 ? "oui" : "non")}</select></label>
+            <label>Année d'ouverture<input class="av_an" type="number" min="1950" max="${new Date().getFullYear()}" placeholder="ex : 2008" value="${a.annee ?? ""}"></label>
+            <label>Régime des primes<select class="av_av70">${opt([["oui", "Avant 70 ans"], ["non", "Après 70 ans"]], a.avant70 ? "oui" : "non")}</select></label>
           </div>
           <div class="benef-row"><span class="muted small">Bénéficiaires :</span> ${benefBoxes(a, i)}
             <button class="av_del danger-link" title="Supprimer">✕ contrat</button>
@@ -956,6 +984,7 @@ function renderAv() {
     $(".av_etab", row).addEventListener("input", (e) => { AV[i].etablissement = e.target.value; save(); });
     $(".av_sous", row).addEventListener("change", (e) => { AV[i].souscripteurId = e.target.value; save(); });
     $(".av_mnt", row).addEventListener("input", (e) => { AV[i].montant = parseNum(e.target.value); save(); });
+    $(".av_an", row).addEventListener("input", (e) => { AV[i].annee = e.target.value === "" ? null : Number(e.target.value); save(); });
     $(".av_av70", row).addEventListener("change", (e) => { AV[i].avant70 = e.target.value === "oui"; save(); });
     $(".av_del", row).addEventListener("click", () => { AV.splice(i, 1); save(); renderAv(); });
   });
