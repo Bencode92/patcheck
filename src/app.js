@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=8";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=8";
-import { buildMermaid, debrief } from "./graph.js?v=8";
-import * as sync from "./sync.js?v=8";
+} from "./data.js?v=9";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=9";
+import { buildMermaid, debrief } from "./graph.js?v=9";
+import * as sync from "./sync.js?v=9";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -643,32 +643,49 @@ function renderPatrimoine() {
 
     <p class="muted small center">💾 Tout est enregistré automatiquement (et synchronisé dans le cloud si activé). Va dans <b>🗺️ Organigramme & Débrief</b> pour voir le résultat.</p>`;
 
-  // --- Actifs ---
-  $$("#tab-content .a_del").forEach((b, i) => b.addEventListener("click", () => { A.splice(i, 1); save(); renderPatrimoine(); }));
-  $$("#tab-content tr[data-i] .a_lib").forEach((el, i) => el.addEventListener("input", (e) => { A[i].libelle = e.target.value; save(); }));
-  $$("#tab-content tr[data-i] .a_val").forEach((el, i) => el.addEventListener("input", (e) => { A[i].valeur = parseNum(e.target.value); save(); }));
-  $$("#tab-content tr[data-i] .a_cat").forEach((el, i) => el.addEventListener("change", (e) => { A[i].categorie = e.target.value; save(); renderPatrimoine(); }));
-  $$("#tab-content tr[data-i] .a_dut").forEach((el, i) => el.addEventListener("change", (e) => { A[i].dutreil = e.target.checked; save(); }));
-  $("#a_add").addEventListener("click", () => { A.push({ id: uid(), libelle: "", categorie: "immobilier", valeur: 0, dutreil: false }); state.actifs = A; save(); renderPatrimoine(); });
+  // --- Câblage par DÉLÉGATION (robuste : un seul gestionnaire par type) ---
+  const root = c;
+  const rowIndex = (el) => { const tr = el.closest("tr[data-i]"); return tr ? +tr.dataset.i : -1; };
 
-  // --- Détentions ---
-  $$("#tab-content .d_del").forEach((b, i) => b.addEventListener("click", () => { D.splice(i, 1); save(); renderPatrimoine(); }));
-  $$("#tab-content .d_prop").forEach((el, i) => el.addEventListener("change", (e) => { D[i].proprietaire = e.target.value; save(); }));
-  $$("#tab-content .d_act").forEach((el, i) => el.addEventListener("change", (e) => { D[i].actifRef = e.target.value; save(); }));
-  $$("#tab-content .d_part").forEach((el, i) => el.addEventListener("input", (e) => { D[i].part = parseNum(e.target.value); save(); }));
-  $$("#tab-content .d_droit").forEach((el, i) => el.addEventListener("change", (e) => { D[i].droit = e.target.value; save(); }));
-  $("#d_add")?.addEventListener("click", () => {
-    const first = A[0];
-    D.push({ proprietaire: state.personnes[0]?.id || "", actifRef: first?.id || "", part: 100, droit: "PP" });
-    state.detentions = D; save(); renderPatrimoine();
-  });
+  root.onclick = (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    if (btn.id === "a_add") { A.push({ id: uid(), libelle: "", categorie: "immobilier", valeur: 0, dutreil: false }); state.actifs = A; save(); renderPatrimoine(); return; }
+    if (btn.id === "d_add") { D.push({ proprietaire: state.personnes[0]?.id || "", actifRef: A[0]?.id || "", part: 100, droit: "PP" }); state.detentions = D; save(); renderPatrimoine(); return; }
+    if (btn.id === "x_add") { X.push({ id: uid(), libelle: "", montant: 0, cible: ownerList()[0]?.[0] || "" }); state.dettes = X; save(); renderPatrimoine(); return; }
+    const i = rowIndex(btn);
+    if (i < 0) return;
+    if (btn.classList.contains("a_del")) { A.splice(i, 1); save(); renderPatrimoine(); }
+    else if (btn.classList.contains("d_del")) { D.splice(i, 1); save(); renderPatrimoine(); }
+    else if (btn.classList.contains("x_del")) { X.splice(i, 1); save(); renderPatrimoine(); }
+  };
 
-  // --- Dettes ---
-  $$("#tab-content .x_del").forEach((b, i) => b.addEventListener("click", () => { X.splice(i, 1); save(); renderPatrimoine(); }));
-  $$("#tab-content .x_lib").forEach((el, i) => el.addEventListener("input", (e) => { X[i].libelle = e.target.value; save(); }));
-  $$("#tab-content .x_val").forEach((el, i) => el.addEventListener("input", (e) => { X[i].montant = parseNum(e.target.value); save(); }));
-  $$("#tab-content .x_cible").forEach((el, i) => el.addEventListener("change", (e) => { X[i].cible = e.target.value; save(); }));
-  $("#x_add").addEventListener("click", () => { X.push({ id: uid(), libelle: "", montant: 0, cible: ownerList()[0]?.[0] || "" }); state.dettes = X; save(); renderPatrimoine(); });
+  root.oninput = (e) => {
+    const t = e.target, i = rowIndex(t);
+    if (i < 0) return;
+    if (t.classList.contains("a_lib")) A[i].libelle = t.value;
+    else if (t.classList.contains("a_val")) A[i].valeur = parseNum(t.value);
+    else if (t.classList.contains("d_part")) D[i].part = parseNum(t.value);
+    else if (t.classList.contains("x_lib")) X[i].libelle = t.value;
+    else if (t.classList.contains("x_val")) X[i].montant = parseNum(t.value);
+    else return;
+    save();
+  };
+
+  root.onchange = (e) => {
+    const t = e.target, i = rowIndex(t);
+    if (i < 0) return;
+    let reRender = false;
+    if (t.classList.contains("a_cat")) { A[i].categorie = t.value; reRender = true; }
+    else if (t.classList.contains("a_dut")) A[i].dutreil = t.checked;
+    else if (t.classList.contains("d_prop")) D[i].proprietaire = t.value;
+    else if (t.classList.contains("d_act")) D[i].actifRef = t.value;
+    else if (t.classList.contains("d_droit")) D[i].droit = t.value;
+    else if (t.classList.contains("x_cible")) X[i].cible = t.value;
+    else return;
+    save();
+    if (reRender) renderPatrimoine();
+  };
 }
 
 // ---------- Onglet Donations réalisées ----------
