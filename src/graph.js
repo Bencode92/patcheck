@@ -1,7 +1,7 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE } from "./data.js?v=12";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE } from "./data.js?v=13";
 
 // Taux d'exonération Dutreil (art. 787 B) sur les titres de société éligibles
 const DUTREIL_EXO = 0.75;
@@ -209,6 +209,9 @@ export function debrief(state) {
   const eur = (n) => Math.round(n).toLocaleString("fr-FR") + " €";
   if (capaciteExoneree > 0)
     reco.push({ level: "action", text: `Vous pouvez encore donner <b>${eur(capaciteExoneree)}</b> en franchise de droits (abattements parent→enfant non utilisés, 100 000 € /parent /enfant /15 ans).` });
+  // Régime matrimonial
+  if (state.regime === "universelle_attribution")
+    reco.push({ level: "warn", text: `Régime <b>communauté universelle + attribution intégrale</b> : au 1er décès tout revient au conjoint (sans droits), mais les enfants n'héritent qu'au 2nd décès et <b>perdent l'abattement de 100 000 € du 1er parent</b> — coût fiscal accru, à arbitrer avec le notaire.` });
   // Enfants sans donation reçue
   enfants.forEach((enf) => {
     const recu = donations.filter((d) => d.beneficiaireId === enf.id).reduce((s, d) => s + d.montant, 0);
@@ -242,6 +245,7 @@ export function debrief(state) {
     patrimoineTaxable,
     exonerationDutreil,
     totalDettes,
+    regime: state.regime || "",
     reco,
     parPersonne,
     parCategorie,

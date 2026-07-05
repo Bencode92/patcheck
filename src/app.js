@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=12";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=12";
-import { buildMermaid, debrief } from "./graph.js?v=12";
-import * as sync from "./sync.js?v=12";
+} from "./data.js?v=13";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=13";
+import { buildMermaid, debrief } from "./graph.js?v=13";
+import * as sync from "./sync.js?v=13";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -202,6 +202,52 @@ function download(name, content, mime = "text/csv;charset=utf-8") {
   a.click();
 }
 
+// Export d'un RÉSUMÉ lisible en CSV (synthèse, exposition, droits par enfant, AV, donations)
+function exporterResume() {
+  const d = debrief(state);
+  const euro = (n) => Math.round(n || 0).toLocaleString("fr-FR") + " €";
+  const rows = [];
+  const push = (...cells) => rows.push(cells);
+
+  push("RÉSUMÉ PATRIMONIAL");
+  push("Édité le", new Date().toLocaleDateString("fr-FR"));
+  push("Régime matrimonial", REGIME_LABEL[state.regime || ""] || "non précisé");
+  push("");
+  push("SYNTHÈSE");
+  push("Patrimoine net du foyer", euro(d.patrimoineFoyer));
+  push("Dettes totales", euro(d.totalDettes));
+  if (d.exonerationDutreil > 0) push("Exonération Dutreil (−75%)", euro(d.exonerationDutreil));
+  push("Assiette taxable (succession)", euro(d.patrimoineTaxable));
+  push("Droits de succession estimés (décès des 2 parents)", euro(d.droitsSuccessionEstimes));
+  push("");
+  const totalCat = Object.values(d.parCategorie).reduce((s, v) => s + v, 0) || 1;
+  push("EXPOSITION PAR CATÉGORIE", "Valeur", "Part");
+  Object.entries(d.parCategorie).sort((a, b) => b[1] - a[1]).forEach(([k, v]) => push(k, euro(v), (v / totalCat * 100).toFixed(0) + " %"));
+  push("");
+  push("PATRIMOINE PAR PERSONNE", "Rôle", "Montant net");
+  state.personnes.forEach((p) => push(p.nom, p.role, euro(d.parPersonne[p.id] || 0)));
+  push("");
+  push("SI DÉCÈS AUJOURD'HUI — PAR ENFANT", "Part reçue", "Abattement", "Base taxable", "Droits à payer", "Net perçu");
+  (d.successionParEnfant || []).forEach((e) => push(e.nom, euro(e.recu), euro(e.abattement), euro(e.base), euro(e.droits), euro(e.net)));
+  push("TOTAL DROITS", "", "", "", euro(d.droitsSuccessionEstimes), "");
+  push("");
+  push("ASSURANCE-VIE", "Banque", "Souscripteur(s)", "Capital", "Régime primes", "Bénéficiaires");
+  (state.av || []).forEach((a) => {
+    const bens = (a.beneficiaires || []).map((b) => { const nom = personne(b)?.nom || b; const pc = a.repartition?.[b]; return pc ? `${nom} ${pc}%` : nom; }).join(" / ");
+    const sous = (personne(a.souscripteurId)?.nom || "") + (a.cosouscripteurId ? " & " + (personne(a.cosouscripteurId)?.nom || "") : "");
+    push(a.libelle || a.id, a.etablissement || "", sous, euro(a.montant), a.avant70 ? "avant 70 ans" : "après 70 ans", bens);
+  });
+  push("");
+  push("DONATIONS RÉALISÉES", "Date", "Donateur", "Bénéficiaire", "Montant", "Statut");
+  state.donations.forEach((x) => {
+    const purge = anneesEcoulees(x.date) >= DELAI_RAPPEL_ANS;
+    push("", x.date, personne(x.donateurId)?.nom || "", personne(x.beneficiaireId)?.nom || "", euro(x.montant), purge ? "purgée (>15 ans)" : "rapportable");
+  });
+
+  const esc = (s) => { s = String(s ?? ""); return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  download("resume-patrimonial.csv", rows.map((r) => r.map(esc).join(",")).join("\n"));
+}
+
 // ---------- Onglet Données (CSV) ----------
 function renderDonnees() {
   const c = $("#tab-content");
@@ -355,10 +401,18 @@ async function renderOrganigramme() {
     .join("") || `<div class="muted small">Aucun actif saisi — va dans l'onglet 🏦 Patrimoine.</div>`;
 
   c.innerHTML = `
+    <div class="card hero">
+      <div>
+        <div class="muted small">Patrimoine net du foyer</div>
+        <div class="hero-total">${eur(d.patrimoineFoyer)}</div>
+        <div class="muted small">Régime : <b>${REGIME_LABEL[d.regime] || "non précisé"}</b> · Droits succession estimés : <b>${eur(d.droitsSuccessionEstimes)}</b></div>
+      </div>
+      <button id="exp_resume" class="btn primary">⬇ Exporter le résumé (CSV)</button>
+    </div>
     ${
       hasData
         ? ""
-        : `<div class="card"><b>Aucune donnée patrimoniale.</b> Va dans <b>📥 Données (CSV)</b>, télécharge le modèle, remplis-le et importe-le.</div>`
+        : `<div class="card"><b>Aucune donnée patrimoniale.</b> Commence par les onglets <b>👪 Famille</b> puis <b>🏦 Patrimoine</b>.</div>`
     }
     <div class="grid-2">
       <div class="card">
@@ -492,6 +546,8 @@ async function renderOrganigramme() {
     </div>`;
 
   // Rendu Mermaid (import dynamique depuis CDN)
+  $("#exp_resume")?.addEventListener("click", exporterResume);
+
   const box = $("#mermaid-box");
   const def = buildMermaid(state);
   try {
@@ -537,7 +593,19 @@ function renderFamille() {
         </tbody>
       </table>
       <button id="addP" class="btn">+ Ajouter une personne</button>
+    </div>
+
+    <div class="card">
+      <h3>💍 Régime matrimonial des parents</h3>
+      <select id="regime" style="max-width:520px">${opt(REGIMES, state.regime || "")}</select>
+      <p class="muted small" id="regime-note" style="margin-top:8px">${REGIME_NOTE[state.regime || ""]}</p>
     </div>`;
+
+  $("#regime")?.addEventListener("change", (e) => {
+    state.regime = e.target.value;
+    save();
+    $("#regime-note").textContent = REGIME_NOTE[state.regime] || "";
+  });
 
   $$("#tab-content tr[data-id]").forEach((tr) => {
     const id = tr.dataset.id;
@@ -596,6 +664,31 @@ const ownerList = () => [
   ...(state.actifs || []).map((a) => [a.id, "🏦 " + (a.libelle || a.id)]),
 ];
 const actifList = () => (state.actifs || []).map((a) => [a.id, (a.libelle || a.id)]);
+
+const REGIMES = [
+  ["", "— non précisé —"],
+  ["acquets", "Communauté réduite aux acquêts (régime légal)"],
+  ["universelle", "Communauté universelle"],
+  ["universelle_attribution", "Communauté universelle + attribution intégrale au survivant"],
+  ["separation", "Séparation de biens"],
+  ["participation", "Participation aux acquêts"],
+];
+const REGIME_LABEL = Object.fromEntries([
+  ["", "non précisé"],
+  ["acquets", "Communauté réduite aux acquêts"],
+  ["universelle", "Communauté universelle"],
+  ["universelle_attribution", "Communauté universelle + attribution intégrale"],
+  ["separation", "Séparation de biens"],
+  ["participation", "Participation aux acquêts"],
+]);
+const REGIME_NOTE = {
+  "": "Précise le régime : il change ce qui entre dans la succession à chaque décès.",
+  acquets: "Chaque parent transmet sa moitié de communauté + ses biens propres. Les enfants héritent dès le 1er décès (avec abattement de ce parent).",
+  universelle: "Tout le patrimoine est commun. Sans clause d'attribution, la moitié revient aux enfants au 1er décès.",
+  universelle_attribution: "⚠️ Au 1er décès, TOUT revient au conjoint survivant sans droits. Mais les enfants n'héritent qu'au 2nd décès : ils perdent l'abattement (100 000 €) du 1er parent et paient plus au final. Arbitrage protection du conjoint ↔ coût fiscal — à valider avec le notaire.",
+  separation: "Chaque parent ne transmet que ses biens propres. Bien identifier qui possède quoi (onglet Patrimoine).",
+  participation: "Comme la séparation pendant le mariage ; une créance de participation peut naître au décès.",
+};
 
 function renderPatrimoine() {
   const c = $("#tab-content");

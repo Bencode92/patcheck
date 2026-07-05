@@ -139,6 +139,9 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .benef-chk { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
 .benef-chk input { width: auto; }
 
+.hero { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px; background: linear-gradient(180deg, #eaf2ff, #f6faff); border-color: #cfe0f7; }
+.hero-total { font-size: 34px; font-weight: 800; color: var(--accent); line-height: 1.1; margin: 2px 0; }
+
 .expo-row { margin-bottom: 12px; }
 .expo-head { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 5px; }
 
