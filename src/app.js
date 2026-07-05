@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=10";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=10";
-import { buildMermaid, debrief } from "./graph.js?v=10";
-import * as sync from "./sync.js?v=10";
+} from "./data.js?v=11";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=11";
+import { buildMermaid, debrief } from "./graph.js?v=11";
+import * as sync from "./sync.js?v=11";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -406,18 +406,25 @@ async function renderOrganigramme() {
       <h2>🎯 Clauses bénéficiaires (assurance-vie)</h2>
       ${
         (state.av || []).length
-          ? `<table class="grid"><thead><tr><th>Contrat</th><th>Banque/Assureur</th><th>Souscripteur</th><th>Capital</th><th>Régime</th><th>Bénéficiaires</th></tr></thead><tbody>
+          ? `<table class="grid"><thead><tr><th>Contrat</th><th>Banque/Assureur</th><th>Souscripteur</th><th>Ouvert</th><th>Capital</th><th>Régime</th><th>Bénéficiaires</th></tr></thead><tbody>
             ${state.av
-              .map(
-                (a) => `<tr>
+              .map((a) => {
+                const bens = (a.beneficiaires || []).map((b) => {
+                  const nom = personne(b)?.nom || b;
+                  const p = a.repartition?.[b];
+                  return p ? `${nom} (${p} %)` : nom;
+                });
+                const clause = a.clause ? `<div class="muted small" style="margin-top:4px">« ${a.clause} »</div>` : "";
+                return `<tr>
                   <td><b>${a.libelle || a.id}</b></td>
                   <td>${a.etablissement || "—"}</td>
                   <td>${personne(a.souscripteurId)?.nom || a.souscripteurId || "?"}</td>
+                  <td>${a.annee || "—"}</td>
                   <td>${eur(a.montant)}</td>
                   <td>${a.avant70 ? "avant 70 ans" : "après 70 ans"}</td>
-                  <td>${(a.beneficiaires || []).map((b) => personne(b)?.nom || b).join(", ") || `<span class="badge warn">à définir</span>`}</td>
-                </tr>`
-              )
+                  <td>${bens.join(", ") || `<span class="badge warn">à définir</span>`}${clause}</td>
+                </tr>`;
+              })
               .join("")}
           </tbody></table>`
           : `<p class="muted">Aucun contrat d'assurance-vie saisi.</p>`
@@ -932,7 +939,13 @@ function renderAv() {
   const AV = state.av || [];
   const benefBoxes = (contrat, i) =>
     state.personnes
-      .map((p) => `<label class="benef-chk"><input type="checkbox" class="av_ben" data-i="${i}" data-p="${p.id}" ${(contrat.beneficiaires || []).includes(p.id) ? "checked" : ""}> ${p.nom}</label>`)
+      .map((p) => {
+        const checked = (contrat.beneficiaires || []).includes(p.id);
+        const pctv = contrat.repartition?.[p.id] ?? "";
+        return `<label class="benef-chk"><input type="checkbox" class="av_ben" data-i="${i}" data-p="${p.id}" ${checked ? "checked" : ""}> ${p.nom}${
+          checked ? `<input class="av_pct" data-i="${i}" data-p="${p.id}" inputmode="numeric" value="${pctv}" placeholder="%" style="max-width:46px;margin-left:6px"><span class="muted">%</span>` : ""
+        }</label>`;
+      })
       .join("");
   c.innerHTML = `
     <div class="card">
@@ -951,8 +964,12 @@ function renderAv() {
             <label>Régime des primes<select class="av_av70">${opt([["oui", "Avant 70 ans"], ["non", "Après 70 ans"]], a.avant70 ? "oui" : "non")}</select></label>
           </div>
           <div class="benef-row"><span class="muted small">Bénéficiaires :</span> ${benefBoxes(a, i)}
-            <button class="av_del danger-link" title="Supprimer">✕ contrat</button>
+            <button class="av_equal btn small" data-i="${i}">répartir également</button>
           </div>
+          <label style="display:block;margin-top:10px" class="muted small">Clause bénéficiaire (texte exact du contrat)
+            <textarea class="av_clause" data-i="${i}" rows="2" placeholder="ex : mon conjoint, à défaut mes enfants nés ou à naître, vivants ou représentés, par parts égales, à défaut mes héritiers">${a.clause || ""}</textarea>
+          </label>
+          <div style="text-align:right;margin-top:6px"><button class="av_del danger-link" title="Supprimer">✕ supprimer ce contrat</button></div>
         </div>`).join("") || `<p class="muted">Aucun contrat. Ajoute-en un.</p>`}
       <button id="av_add" class="btn">+ Ajouter un contrat</button>
     </div>
@@ -986,14 +1003,35 @@ function renderAv() {
     $(".av_mnt", row).addEventListener("input", (e) => { AV[i].montant = parseNum(e.target.value); save(); });
     $(".av_an", row).addEventListener("input", (e) => { AV[i].annee = e.target.value === "" ? null : Number(e.target.value); save(); });
     $(".av_av70", row).addEventListener("change", (e) => { AV[i].avant70 = e.target.value === "oui"; save(); });
+    $(".av_clause", row).addEventListener("input", (e) => { AV[i].clause = e.target.value; save(); });
     $(".av_del", row).addEventListener("click", () => { AV.splice(i, 1); save(); renderAv(); });
   });
   $$("#tab-content .av_ben").forEach((cb) => cb.addEventListener("change", (e) => {
     const i = +e.target.dataset.i, pid = e.target.dataset.p;
     AV[i].beneficiaires = AV[i].beneficiaires || [];
     if (e.target.checked) { if (!AV[i].beneficiaires.includes(pid)) AV[i].beneficiaires.push(pid); }
-    else AV[i].beneficiaires = AV[i].beneficiaires.filter((x) => x !== pid);
+    else {
+      AV[i].beneficiaires = AV[i].beneficiaires.filter((x) => x !== pid);
+      if (AV[i].repartition) delete AV[i].repartition[pid];
+    }
     save();
+    renderAv(); // pour afficher/masquer le champ %
+  }));
+  $$("#tab-content .av_pct").forEach((el) => el.addEventListener("input", (e) => {
+    const i = +e.target.dataset.i, pid = e.target.dataset.p;
+    AV[i].repartition = AV[i].repartition || {};
+    AV[i].repartition[pid] = parseNum(e.target.value);
+    save();
+  }));
+  $$("#tab-content .av_equal").forEach((btn) => btn.addEventListener("click", () => {
+    const i = +btn.dataset.i;
+    const bens = AV[i].beneficiaires || [];
+    if (!bens.length) return;
+    const part = Math.floor((100 / bens.length) * 10) / 10;
+    AV[i].repartition = {};
+    bens.forEach((pid, k) => (AV[i].repartition[pid] = k === bens.length - 1 ? +(100 - part * (bens.length - 1)).toFixed(1) : part));
+    save();
+    renderAv();
   }));
   $("#av_add").addEventListener("click", () => {
     AV.push({ id: uid(), libelle: "", souscripteurId: state.personnes.find((p) => p.role === "parent")?.id || "", montant: 0, avant70: true, beneficiaires: [] });
