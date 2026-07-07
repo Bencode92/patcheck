@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=29";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=29";
-import { buildMermaid, debrief } from "./graph.js?v=29";
-import * as sync from "./sync.js?v=29";
+} from "./data.js?v=30";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=30";
+import { buildMermaid, debrief } from "./graph.js?v=30";
+import * as sync from "./sync.js?v=30";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1372,6 +1372,7 @@ function renderEntreprise() {
         ${a.dutreil ? `<div class="line"><span>Exonération Dutreil (−75 %, art. 787 B)</span><b style="color:var(--accent-2)">− ${eur(valeur * 0.75)}</b></div>
         <div class="line total"><span>Assiette taxable en transmission</span><b>${eur(valeur * 0.25)}</b></div>` : `<div class="line"><span class="muted small">Sans pacte Dutreil : assiette taxable = valeur pleine.</span></div>`}
         ${tUS != null ? `<div class="line"><span>Démembrement — usufruitier ${usPers.nom} (${age} ans${a.demembrementAnnee ? " en " + a.demembrementAnnee : ", âge actuel"}) → usufruit ${pct(tUS)} / NP ${pct(1 - tUS)}</span><b>NP transmise : ${eur(npVal)}</b></div>` : ""}
+        ${a.dutreil && npVal != null ? `<div class="line total"><span>💡 Donation de la nue-propriété sous Dutreil → base taxable</span><b>${eur(npVal)} × 25 % = ${eur(npVal * 0.25)}</b></div>` : ""}
       </div>
     </div>`;
   };
