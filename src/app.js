@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=38";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=38";
-import { buildMermaid, debrief } from "./graph.js?v=38";
-import * as sync from "./sync.js?v=38";
-import { askAI } from "./ai.js?v=38";
+} from "./data.js?v=39";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=39";
+import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=39";
+import * as sync from "./sync.js?v=39";
+import { askAI } from "./ai.js?v=39";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -415,16 +415,163 @@ function renderCloudCard() {
 // ---------- Onglet Organigramme & Débrief ----------
 async function renderOrganigramme() {
   const c = $("#tab-content");
-  const hasData = (state.actifs || []).length || (state.detentions || []).length || state.donations.length;
   const d = debrief(state);
+  const hasData = (state.actifs || []).length || (state.detentions || []).length || (state.donations || []).length || (state.av || []).length;
   const eur = (n) => Math.round(n || 0).toLocaleString("fr-FR") + " €";
+  const pct = (n) => (n * 100).toFixed(1).replace(".", ",") + " %";
+  const parents = state.personnes.filter((p) => p.role === "parent");
+  const enfants = state.personnes.filter((p) => p.role === "enfant");
+  const avTotal = (d.avAvant70 || 0) + (d.avApres70 || 0);
+  const patrimoineGlobal = d.patrimoineFoyer + avTotal;
+  const tauxEffectif = patrimoineGlobal > 0 ? d.totalDroitsTous / patrimoineGlobal : 0;
+  const AB_AV = 152500;
 
-  const DROIT_LBL = { PP: "Pleine propriété", US: "Usufruit", NP: "Nue-propriété" };
-  const droitBadge = (dr) => dr === "PP" ? "" : `<span class="badge warn">${DROIT_LBL[dr] || dr}</span>`;
-  const persoDetailCard = state.personnes.map((p) => {
+  // ---- ① Cockpit ----
+  const cockpit = `<div class="cockpit">
+    <div class="kpi2"><div class="lbl">Patrimoine global</div><div class="val num">${eur(patrimoineGlobal)}</div><div class="sub">Biens nets ${eur(d.patrimoineFoyer)} + AV ${eur(avTotal)}</div></div>
+    <div class="kpi2"><div class="lbl">Base successorale</div><div class="val num">${eur(d.baseSuccessoraleGlobale)}</div><div class="sub">${d.exonerationDutreil > 0 ? `Après Dutreil −${eur(d.exonerationDutreil)}` : "Assiette taxable"}${d.apres70Reintegre > 0 ? ` · AV&gt;70 +${eur(d.apres70Reintegre)}` : ""}</div></div>
+    <div class="kpi2 alert"><div class="lbl">Total droits à payer</div><div class="val num">${eur(d.totalDroitsTous)}</div><div class="sub">Succession ${eur(d.droitsSuccessionGlobaux)} + AV ${eur(d.totalDroitsAV)}</div></div>
+    <div class="kpi2"><div class="lbl">Taux effectif</div><div class="val num">${pct(tauxEffectif)}</div><div class="sub">Droits / patrimoine global transmis</div></div>
+  </div>`;
+
+  // ---- ② Répartition miroir (2 parents) ----
+  const catKey = (cat) => (cat === "sci" ? "immobilier" : cat);
+  const MIRLBL = { immobilier: "🏠 Immobilier + SCI", entreprise: "🏭 Entreprise", titres: "📈 Titres", liquidites: "💰 Liquidités", av: "🛡️ Assurance-vie" };
+  const MIRORDER = ["immobilier", "entreprise", "titres", "liquidites", "av"];
+  const parentCat = (p) => {
+    const m = {};
+    (d.parPersonneDetail[p.id] || []).forEach((it) => { const k = catKey(it.categorie); m[k] = (m[k] || 0) + it.valeur; });
+    let av = 0;
+    (state.av || []).forEach((a) => { const mt = Number(a.montant) || 0; if (a.cosouscripteurId && (a.souscripteurId === p.id || a.cosouscripteurId === p.id)) av += mt / 2; else if (!a.cosouscripteurId && a.souscripteurId === p.id) av += mt; });
+    if (av > 0) m.av = av;
+    return m;
+  };
+  let mirror = "";
+  if (parents.length === 2) {
+    const [pa, pb] = parents;
+    const ma = parentCat(pa), mb = parentCat(pb);
+    const keys = MIRORDER.filter((k) => (ma[k] || 0) > 0 || (mb[k] || 0) > 0);
+    const maxV = Math.max(1, ...keys.flatMap((k) => [ma[k] || 0, mb[k] || 0]));
+    const totA = Object.values(ma).reduce((s, v) => s + v, 0), totB = Object.values(mb).reduce((s, v) => s + v, 0);
+    const ageA = ageDe(pa), ageB = ageDe(pb);
+    mirror = `<div class="card">
+      <div class="section-head"><div><h2>Répartition par catégorie et par parent</h2><div class="small muted">SCI regroupée avec l'immobilier ; assurance-vie ajoutée comme classe. Barres proportionnelles au plus gros poste.</div></div>
+        <div class="legend"><span><span class="dot" style="background:var(--accent)"></span>${pa.nom}${ageA != null ? ` (${ageA} ans)` : ""}</span><span><span class="dot" style="background:#6ea0e8"></span>${pb.nom}${ageB != null ? ` (${ageB} ans)` : ""}</span></div></div>
+      <div class="mirror">
+        <div class="mirror-head"><div class="l">${pa.nom}</div><div class="c">Catégorie</div><div>${pb.nom}</div></div>
+        ${keys.map((k) => `<div class="mirror-row">
+          <div class="mbar l"><span class="amt num">${eur(ma[k] || 0)}</span><span class="track"><span class="fill" style="width:${Math.round((ma[k] || 0) / maxV * 100)}%"></span></span></div>
+          <div class="mirror-cat">${MIRLBL[k] || k}</div>
+          <div class="mbar r"><span class="track"><span class="fill" style="width:${Math.round((mb[k] || 0) / maxV * 100)}%"></span></span><span class="amt num">${eur(mb[k] || 0)}</span></div>
+        </div>`).join("")}
+        <div class="mirror-row mirror-total"><div class="mbar l"><span class="amt num">${eur(totA)}</span></div><div class="mirror-cat">Total</div><div class="mbar r"><span class="amt num">${eur(totB)}</span></div></div>
+      </div></div>`;
+  }
+
+  // ---- ③ Diptyque décès ----
+  const simCol = (parent) => {
+    const s = simulerDeces(state, parent.id);
+    if (!s) return "";
+    const av1 = s.premierDeces.avDenouees.reduce((x, a) => x + a.beneficiaires.reduce((y, b) => y + b.droits, 0), 0);
+    const droitsEnf1 = s.premierDeces.partEnfants.reduce((x, r) => x + r.droits, 0);
+    const age = ageDe(parent);
+    return `<div class="deces-col">
+      <div class="head"><span>Décès de ${parent.nom} d'abord</span>${age != null ? `<span class="badge neutral">${age} ans</span>` : ""}</div>
+      <div class="step">
+        <div class="step-tag">1ᵉʳ décès — aujourd'hui</div>
+        ${s.conjoint ? `<div class="kv"><span class="k">${s.conjoint.nom} reçoit${s.premierDeces.recuConjoint > 0 ? " (attribution intégrale)" : ""}</span><span class="v num">${eur(s.premierDeces.recuConjoint || s.premierDeces.masseDefunt)}</span></div>
+        <div class="kv"><span class="k">Droits du conjoint</span><span class="v num pos">0 €</span></div>` : ""}
+        ${droitsEnf1 > 0 ? `<div class="kv"><span class="k">Droits enfants (1ᵉʳ décès)</span><span class="v num neg">${eur(droitsEnf1)}</span></div>` : ""}
+        <div class="kv"><span class="k">AV de ${parent.nom} dénouée → bénéf. (990 I)</span><span class="v num ${av1 > 0 ? "amb" : "pos"}">${eur(av1)}</span></div>
+        ${s.premierDeces.abattementsPerdus > 0 ? `<div class="hint">Abattements de 100 000 € × ${enfants.length} enfant(s) sur la part de ${parent.nom} : <b>non utilisés</b> (perdus à ce stade).</div>` : ""}
+      </div>
+      <div class="step second">
+        <div class="step-tag">2ᵈ décès${s.conjoint ? " — " + s.conjoint.nom : ""}</div>
+        <div class="kv"><span class="k">Masse transmise aux enfants</span><span class="v num">${eur(s.secondDeces.masse)}</span></div>
+        <div class="kv"><span class="k">Droits des enfants</span><span class="v num neg">${eur(s.secondDeces.totalDroitsSecond)}</span></div>
+        <div class="kv total"><span class="k">Coût total de cet ordre</span><span class="v num neg">${eur(s.totalOrdre)}</span></div>
+      </div>
+    </div>`;
+  };
+  const sim0 = parents.length ? simulerDeces(state, parents[0].id) : null;
+  let diptyque = "";
+  if (parents.length && enfants.length) {
+    const rows = (sim0 && sim0.secondDeces.parEnfant) || [];
+    const tot = { recu: 0, ab: 0, base: 0, droits: 0, net: 0 };
+    rows.forEach((r) => { tot.recu += r.recu; tot.ab += r.abattement; tot.base += r.base; tot.droits += r.droits; tot.net += r.net; });
+    diptyque = `<div class="card">
+      <div class="section-head"><div><h2>⚰️ Si décès demain — les deux ordres possibles</h2><div class="small muted">Chaque volet déroule la chronologie : 1ᵉʳ décès (conjoint) puis 2ᵈ décès (enfants).</div></div></div>
+      <div class="deces-grid">${parents.map(simCol).join("")}</div>
+      ${sim0 && sim0.hypothese ? `<p class="small muted" style="margin-top:10px">ℹ️ Hypothèse de calcul : ${sim0.hypothese}</p>` : ""}
+      ${rows.length ? `<h3 style="margin-top:16px">Droits par enfant au 2ᵈ décès${parents.length > 1 ? ` (ordre : décès de ${parents[0].nom} d'abord)` : ""}</h3>
+      <div class="table-wrap"><table class="grid2">
+        <thead><tr><th>Enfant</th><th>Part reçue</th><th>Abattement</th><th>Base taxable</th><th>Droits</th><th>Net perçu</th><th>Taux</th></tr></thead>
+        <tbody>${rows.map((r) => `<tr><td>${r.nom}</td><td class="num">${eur(r.recu)}</td><td class="num">−${eur(r.abattement)}</td><td class="num">${eur(r.base)}</td><td class="num droits">${eur(r.droits)}</td><td class="num net">${eur(r.net)}</td><td class="num">${r.recu > 0 ? pct(r.droits / r.recu) : "—"}</td></tr>`).join("")}</tbody>
+        <tfoot><tr><td>Total enfants</td><td class="num">${eur(tot.recu)}</td><td class="num">−${eur(tot.ab)}</td><td class="num">${eur(tot.base)}</td><td class="num droits">${eur(tot.droits)}</td><td class="num net">${eur(tot.net)}</td><td class="num">${tot.recu > 0 ? pct(tot.droits / tot.recu) : "—"}</td></tr></tfoot>
+      </table></div>` : ""}
+    </div>`;
+  }
+
+  // ---- ⑤ Fiche de synthèse ----
+  const fiche = `<div class="card">
+    <h2>💰 Synthèse des droits</h2>
+    <div class="small muted" style="margin-bottom:10px">Comment on passe du patrimoine au total à payer.</div>
+    <div class="fiche">
+      <div class="row"><span class="k">Patrimoine net des biens</span><span class="v num">${eur(d.patrimoineFoyer)}</span></div>
+      ${d.exonerationDutreil > 0 ? `<div class="row sub"><span class="k">Exonération Dutreil (−75 % titres éligibles)</span><span class="v num pos">−${eur(d.exonerationDutreil)}</span></div>` : ""}
+      ${d.apres70Reintegre > 0 ? `<div class="row sub"><span class="k">AV après 70 ans réintégrée (au-delà de 30 500 €)</span><span class="v num amb">+${eur(d.apres70Reintegre)}</span></div>` : ""}
+      <div class="row"><span class="k">Base successorale globale</span><span class="v num">${eur(d.baseSuccessoraleGlobale)}</span></div>
+      <div class="row sub"><span class="k">Droits de succession (enfants, après abattements)</span><span class="v num">${eur(d.droitsSuccessionGlobaux)}</span></div>
+      <div class="row sub"><span class="k">Droits assurance-vie 990 I (avant 70 ans)</span><span class="v num">${eur(d.totalDroitsAV)}</span></div>
+      <div class="row grand"><span class="k">Total des droits à payer</span><span class="v num">${eur(d.totalDroitsTous)}</span></div>
+    </div></div>`;
+
+  // ---- ⑦ AV par bénéficiaire ----
+  let avCard = "";
+  if ((d.avBeneficiaires || []).length) {
+    avCard = `<div class="card">
+      <div class="section-head"><div><h2>🛡️ Assurance-vie — ce que touche chaque bénéficiaire</h2><div class="small muted">Avant 70 ans (990 I) : abattement 152 500 € par bénéficiaire, puis 20 % / 31,25 %. Réparti selon la clause.</div></div><span class="badge ok">Hors succession</span></div>
+      <div class="benef-cards">${d.avBeneficiaires.map((x) => {
+        const over = x.capital > AB_AV;
+        const pctUsed = Math.min(100, Math.round(x.capital / AB_AV * 100));
+        const reste = Math.max(0, AB_AV - x.capital);
+        return `<div class="benef-card">
+          <div class="nom">${x.nom}</div>
+          <div class="cap-recu num">${eur(x.capital)}</div>
+          <div class="gauge2"><div class="bar"><div class="fill ${over ? "over" : ""}" style="width:${pctUsed}%"></div></div>
+            <div class="cap"><span>${over ? "Abattement 152 500 € dépassé" : "Abattement utilisé à " + pctUsed + " %"}</span><span class="num">${over ? pctUsed + " %" : eur(reste) + " restants"}</span></div></div>
+          <div class="kv"><span class="k">Base taxable</span><span class="v num">${eur(x.base)}</span></div>
+          <div class="kv"><span class="k">Droits</span><span class="v num ${x.droits > 0 ? "neg" : "pos"}">${eur(x.droits)}</span></div>
+          <div class="kv total"><span class="k">Net perçu</span><span class="v num pos">${eur(x.net)}</span></div>
+        </div>`;
+      }).join("")}</div></div>`;
+  }
+
+  // ---- Scénarios ----
+  let scenarios = "";
+  if (d.scenarios) {
+    const s = d.scenarios;
+    const match = d.regime === "universelle_attribution" ? "attribution" : (d.regime && d.regime !== "" ? "progressif" : null);
+    const best = ["attribution", "progressif", "simultane"].reduce((a, b) => (s[b].total < s[a].total ? b : a));
+    const SC = [
+      ["attribution", "Attribution intégrale", "Tout au conjoint au 1ᵉʳ décès, les enfants héritent en une fois au 2ᵈ (1 abattement)."],
+      ["progressif", "Transmission progressive", "Deux successions successives : abattements et tranches basses jouent deux fois."],
+      ["simultane", "Décès simultané", "Hypothèse d'école : les deux masses transmises en même temps (2 abattements)."],
+    ];
+    scenarios = `<div class="card">
+      <div class="section-head"><div><h2>⚖️ Scénarios de transmission — coût comparé pour les enfants</h2><div class="small muted">Trois trajectoires, même patrimoine. L'écart vient des abattements utilisés une ou deux fois.</div></div></div>
+      <div class="scn-grid">${SC.map(([k, t, dsc]) => `<div class="scn ${k === best ? "best" : ""} ${k === match ? "current" : ""}">
+        <div class="badges">${k === match ? '<span class="badge">Votre régime</span>' : ""}${k === best ? '<span class="badge ok">Le moins coûteux</span>' : ""}</div>
+        <div class="t">${t}</div><div class="d">${dsc}</div>
+        <div class="cost num ${k === best ? "pos" : "neg"}">${eur(s[k].total)}</div>
+        <div class="small muted">${k === best ? "Le plus avantageux" : "Surcoût vs meilleur : " + eur(s[k].total - s[best].total)}</div>
+      </div>`).join("")}</div></div>`;
+  }
+
+  // ---- ⑥ Qui possède quoi ----
+  const persoCards = state.personnes.map((p) => {
     const items = (d.parPersonneDetail[p.id] || []).slice().sort((a, b) => b.valeur - a.valeur);
     const bienTotal = d.parPersonne[p.id] || 0;
-    // Assurance-vie attribuée : souscripteur (ou 50/50 en co-adhésion)
     const avItems = [];
     (state.av || []).forEach((a) => {
       const m = Number(a.montant) || 0;
@@ -433,263 +580,39 @@ async function renderOrganigramme() {
     });
     const avPerso = avItems.reduce((s, i) => s + i.val, 0);
     const grand = bienTotal + avPerso;
-    const roleLbl = p.role === "parent" ? "Parent" : p.role === "enfant" ? "Enfant" : p.role;
-
-    // Regroupement des biens par catégorie → un toggle par catégorie
+    const roleBadge = p.role === "parent" ? '<span class="badge">parent</span>' : '<span class="badge neutral">enfant</span>';
     const byCat = {};
     items.forEach((it) => (byCat[it.categorie] ||= []).push(it));
-    const catBlocks = Object.entries(byCat).map(([cat, list]) => {
+    const catDet = Object.entries(byCat).map(([cat, list]) => {
       const sub = list.reduce((s, i) => s + i.valeur, 0);
-      const rows = list.map((it) => `<tr>
-        <td>${it.libelle}</td>
-        <td>${it.part} %</td>
-        <td>${it.droit === "PP" ? '<span class="muted small">pleine propriété</span>' : `${droitBadge(it.droit)} <span class="muted small">${Math.round(it.fraction * 100)} % (669, usuf. ${it.usuAge} ans)</span>`}</td>
-        <td style="text-align:right"><b>${eur(it.valeur)}</b>${it.droit !== "PP" ? `<div class="muted small">${it.part}% × ${Math.round(it.fraction * 100)}%</div>` : ""}</td>
-      </tr>`).join("");
-      return `<details class="cat-details" open>
-        <summary class="cat-sum"><span>${CAT_LOOKUP[cat] || cat} <span class="muted small">· ${list.length} bien(s)</span></span><b>${eur(sub)}</b></summary>
-        <table class="grid"><thead><tr><th>Bien / actif</th><th>Quote-part</th><th>Droit</th><th style="text-align:right">Valeur détenue</th></tr></thead><tbody>${rows}</tbody></table>
-      </details>`;
+      return `<details class="cat2" open><summary class="csum"><span class="chev">▶</span>${CAT_LOOKUP[cat] || cat}<span class="tot num">${eur(sub)}</span></summary>
+        ${list.map((it) => `<div class="ligne-bien"><span class="lib">${it.libelle} <span class="meta">· ${it.part} % · ${it.droit}${it.droit !== "PP" ? ` (${Math.round(it.fraction * 100)} %, usuf. ${it.usuAge} ans)` : ""}</span></span><span class="val num">${eur(it.valeur)}</span></div>`).join("")}</details>`;
     }).join("");
-    const avBlock = avItems.length ? `<details class="cat-details" open>
-      <summary class="cat-sum"><span>🛡️ Assurance-vie <span class="muted small">· hors succession</span></span><b>${eur(avPerso)}</b></summary>
-      <table class="grid"><tbody>${avItems.map((it) => `<tr>
-        <td>${it.lib}${it.co ? ' <span class="muted small">(co-adhésion ½)</span>' : ""}</td>
-        <td style="text-align:right"><b>${eur(it.val)}</b></td>
-      </tr>`).join("")}</tbody></table>
-    </details>` : "";
-
-    return `<details class="perso-details" open>
-      <summary class="perso-sum">
-        <span><b style="font-size:15px">${p.nom}</b> <span class="badge ${p.role === "parent" ? "warn" : "ok"}">${roleLbl}</span> <span class="muted small">${items.length} bien(s)${avItems.length ? " + AV" : ""}</span></span>
-        <b style="color:var(--accent);font-size:16px">${eur(grand)}</b>
-      </summary>
-      ${(items.length || avItems.length)
-        ? `<div class="perso-body">${catBlocks}${avBlock}</div>`
-        : `<div class="muted small" style="padding:4px 15px 14px">Rien de détenu pour l'instant.</div>`}
-    </details>`;
+    const avDet = avItems.length ? `<details class="cat2"><summary class="csum"><span class="chev">▶</span>🛡️ Assurance-vie<span class="tot num">${eur(avPerso)}</span></summary>
+      ${avItems.map((it) => `<div class="ligne-bien"><span class="lib">${it.lib}${it.co ? ' <span class="meta">(co-adhésion ½)</span>' : ""}</span><span class="val num">${eur(it.val)}</span></div>`).join("")}</details>` : "";
+    return `<details class="perso2" ${p.role === "parent" ? "open" : ""}><summary class="psum"><span class="chev">▶</span><span class="who">${p.nom} ${roleBadge}</span><span class="tot num">${eur(grand)}</span></summary>
+      <div class="pbody">${(items.length || avItems.length) ? catDet + avDet : '<div class="small muted" style="padding:8px 0">Rien de détenu pour l\'instant.</div>'}</div></details>`;
   }).join("");
-  // Exposition : SCI regroupées avec l'immobilier, assurance-vie ajoutée comme classe d'actif
-  const hasSci = (d.parCategorie.sci || 0) > 0;
-  const avTotal = (d.avAvant70 || 0) + (d.avApres70 || 0);
-  const expo = {};
-  Object.entries(d.parCategorie).forEach(([k, v]) => {
-    const key = k === "sci" ? "immobilier" : k;
-    expo[key] = (expo[key] || 0) + v;
-  });
-  if (avTotal > 0) expo.assurancevie = (expo.assurancevie || 0) + avTotal;
-  const CAT_LBL = { immobilier: hasSci ? "🏠 Immobilier (dont SCI)" : "🏠 Immobilier", entreprise: "🏭 Entreprise", liquidites: "💶 Liquidités", titres: "📈 Titres", assurancevie: "🛡️ Assurance-vie", autre: "Autre" };
-  const totalCat = Object.values(expo).reduce((s, v) => s + v, 0) || 1;
-  const catRows = Object.entries(expo)
-    .sort((a, b) => b[1] - a[1])
-    .map(([k, v]) => {
-      const p = (v / totalCat) * 100;
-      return `<div class="expo-row">
-        <div class="expo-head"><span>${CAT_LBL[k] || k}</span><b>${eur(v)} <span class="muted">· ${p.toFixed(0)} %</span></b></div>
-        <div class="gauge"><div class="gauge-fill" style="width:${p}%"></div></div>
-      </div>`;
-    })
-    .join("") || `<div class="muted small">Aucun actif saisi — va dans l'onglet 🏦 Patrimoine.</div>`;
+  const quiPossede = `<div class="card">
+    <div class="qpq-bar"><div><h2>👥 Qui possède quoi</h2><div class="small muted">Détentions par personne, regroupées par catégorie, avec quote-part, droit (PP/US/NP) et fraction art. 669.</div></div>
+      <div style="display:flex;gap:8px"><button id="toggle_all" class="btn">Tout déplier</button><button id="exp_resume" class="btn ghost">⬇ Export CSV</button></div></div>
+    ${persoCards || '<div class="small muted">Ajoute des personnes et des biens dans les onglets Famille et Patrimoine.</div>'}</div>`;
+
+  // ---- Reco / reste à faire ----
+  const recoCard = (d.reco || []).length
+    ? `<div class="card"><h2>🎯 Reste à faire / optimisation</h2><div class="reco-list">${d.reco.map((r) => `<div class="reco reco-${r.level}"><span class="reco-ico">${{ action: "➡️", info: "ℹ️", warn: "⚠️", ok: "✔️" }[r.level] || "•"}</span><span>${r.text}</span></div>`).join("")}</div></div>`
+    : "";
 
   c.innerHTML = `
-    <div class="card hero">
-      <div>
-        <div class="muted small">Patrimoine global du foyer${avTotal > 0 ? " (avec assurance-vie)" : ""}</div>
-        <div class="hero-total">${eur(d.patrimoineFoyer + avTotal)}</div>
-        <div class="muted small">${avTotal > 0 ? `dont biens ${eur(d.patrimoineFoyer)} + assurance-vie ${eur(avTotal)} · ` : ""}Régime : <b>${REGIME_LABEL[d.regime] || "non précisé"}</b> · Droits succession estimés (hors AV) : <b>${eur(d.droitsSuccessionEstimes)}</b></div>
-      </div>
-      <button id="exp_resume" class="btn primary">⬇ Exporter le résumé (CSV)</button>
-    </div>
-    ${
-      hasData
-        ? ""
-        : `<div class="card"><b>Aucune donnée patrimoniale.</b> Commence par les onglets <b>👪 Famille</b> puis <b>🏦 Patrimoine</b>.</div>`
-    }
-    <div class="card">
-      <h2>👥 Qui possède quoi — détail par personne</h2>
-      <p class="muted small">Répartition détenue par chaque personne (biens en direct + parts de SCI/société, avec démembrement). Total foyer : <b>${eur(d.patrimoineFoyer)}</b>.</p>
-      ${persoDetailCard}
-    </div>
-
-    <div class="grid-2">
-      <div class="card">
-        <h3>📊 Exposition patrimoniale</h3>
-        ${catRows}
-      </div>
-      <div class="card">
-        <h3>🎁 Donations</h3>
-        <div class="result">
-          <div class="line"><span>Total déjà donné</span><b>${eur(d.dejaDonneTotal)}</b></div>
-          <div class="line"><span>Encore rapportable (&lt;15 ans)</span><b>${eur(d.rapportable)}</b></div>
-          <div class="line"><span>Purgé (&gt;15 ans)</span><b>${eur(d.purge)}</b></div>
-          <div class="line total"><span>Capacité de don exonérée restante</span><b>${eur(d.capaciteExoneree)}</b></div>
-        </div>
-      </div>
-      <div class="card">
-        <h3>🛡️ Assurance-vie & succession</h3>
-        <div class="result">
-          <div class="line"><span>Capital AV avant 70 ans</span><b>${eur(d.avAvant70)}</b></div>
-          <div class="line"><span>Capital AV après 70 ans</span><b>${eur(d.avApres70)}</b></div>
-          <div class="line total"><span>Droits succession estimés*</span><b>${eur(d.droitsSuccessionEstimes)}</b></div>
-        </div>
-        <p class="muted small">*Estimation simplifiée : décès des 2 parents, patrimoine réparti également entre ${d.nbEnfants} enfant(s), 2 abattements de 100 000 € par enfant. Hors AV. Voir l'onglet Simulateur pour le détail.</p>
-      </div>
-    </div>
-
-    ${
-      d.totalDettes > 0
-        ? `<div class="card"><div class="result">
-             <div class="line"><span>Valeur brute détenue par le foyer</span><b>${eur(d.patrimoineFoyer + d.totalDettes)}</b></div>
-             <div class="line"><span>Dettes (SCI / pro / perso)</span><b style="color:var(--danger)">− ${eur(d.totalDettes)}</b></div>
-             <div class="line total"><span>Patrimoine net du foyer</span><b>${eur(d.patrimoineFoyer)}</b></div>
-           </div></div>`
-        : ""
-    }
-
-    <div class="card">
-      <h2>🎯 Clauses bénéficiaires (assurance-vie)</h2>
-      ${
-        (state.av || []).length
-          ? `<table class="grid"><thead><tr><th>Contrat</th><th>Banque/Assureur</th><th>Souscripteur</th><th>Ouvert</th><th>Capital</th><th>Régime</th><th>Bénéficiaires</th></tr></thead><tbody>
-            ${state.av
-              .map((a) => {
-                const bens = (a.beneficiaires || []).map((b) => {
-                  const nom = personne(b)?.nom || b;
-                  const p = a.repartition?.[b];
-                  return p ? `${nom} (${p} %)` : nom;
-                });
-                const clause = a.clause ? `<div class="muted small" style="margin-top:4px">« ${a.clause} »</div>` : "";
-                return `<tr>
-                  <td><b>${a.libelle || a.id}</b></td>
-                  <td>${a.etablissement || "—"}</td>
-                  <td>${personne(a.souscripteurId)?.nom || a.souscripteurId || "?"}${a.cosouscripteurId ? " & " + (personne(a.cosouscripteurId)?.nom || "") + " <span class=\"muted small\">(co-adh.)</span>" : ""}</td>
-                  <td>${a.annee || "—"}</td>
-                  <td>${eur(a.montant)}</td>
-                  <td>${a.avant70 ? "avant 70 ans" : "après 70 ans"}</td>
-                  <td>${bens.join(", ") || `<span class="badge warn">à définir</span>`}${clause}</td>
-                </tr>`;
-              })
-              .join("")}
-          </tbody></table>`
-          : `<p class="muted">Aucun contrat d'assurance-vie saisi.</p>`
-      }
-    </div>
-
-    ${
-      (d.reco || []).length
-        ? `<div class="card">
-             <h2>✅ Reste à faire & optimisation</h2>
-             <div class="reco-list">
-               ${d.reco
-                 .map((r) => `<div class="reco reco-${r.level}"><span class="reco-ico">${{ action: "➡️", info: "ℹ️", warn: "⚠️", ok: "✔️" }[r.level] || "•"}</span><span>${r.text}</span></div>`)
-                 .join("")}
-             </div>
-           </div>`
-        : ""
-    }
-
-    <div class="card">
-      <h2>⚰️ Si décès aujourd'hui — droits par enfant</h2>
-      <p class="muted small">Hypothèse : décès des ${d.nbParents} parent(s), patrimoine du foyer (${eur(d.patrimoineFoyer)}) réparti également entre ${d.nbEnfants} enfant(s). Abattement de 100 000 € par parent et par enfant, minoré des donations des 15 dernières années. Hors assurance-vie (fiscalité propre).</p>
-      ${
-        d.exonerationDutreil > 0
-          ? `<div class="result" style="margin-bottom:12px">
-               <div class="line"><span>Patrimoine économique transmis</span><b>${eur(d.patrimoineFoyer)}</b></div>
-               <div class="line"><span>Exonération pacte Dutreil (−75 % titres éligibles, art. 787 B)</span><b style="color:var(--accent-2)">− ${eur(d.exonerationDutreil)}</b></div>
-               <div class="line total"><span>Assiette taxable après Dutreil</span><b>${eur(d.patrimoineTaxable)}</b></div>
-             </div>`
-          : ""
-      }
-      <table class="grid"><thead><tr>
-        <th>Enfant</th><th>Part reçue</th><th>Abattement dispo.</th><th>Base taxable</th><th>Droits à payer</th><th>Net perçu</th><th>Taux</th>
-      </tr></thead><tbody>
-      ${
-        (d.successionParEnfant || [])
-          .map(
-            (e) => `<tr>
-          <td><b>${e.nom}</b></td>
-          <td>${eur(e.recu)}</td>
-          <td>${eur(e.abattement)}</td>
-          <td>${eur(e.base)}</td>
-          <td style="color:var(--warn)"><b>${eur(e.droits)}</b></td>
-          <td>${eur(e.net)}</td>
-          <td>${(e.tauxEffectif * 100).toFixed(1)} %</td>
-        </tr>`
-          )
-          .join("") || `<tr><td colspan="7" class="muted center">Ajoute des enfants et des actifs.</td></tr>`
-      }
-      </tbody>
-      <tfoot><tr>
-        <th>Total foyer</th><td>${eur(d.patrimoineFoyer)}</td><td></td><td></td>
-        <td style="color:var(--warn)"><b>${eur(d.droitsSuccessionEstimes)}</b></td><td></td><td></td>
-      </tr></tfoot>
-      </table>
-    </div>
-
-    ${
-      (d.avBeneficiaires || []).length
-        ? `<div class="card">
-      <h2>🛡️ Assurance-vie — ce que touche chaque bénéficiaire (990 I)</h2>
-      <p class="muted small">Primes versées <b>avant 70 ans</b> : abattement de 152 500 € <b>par bénéficiaire</b>, puis 20 % jusqu'à 700 700 € et 31,25 % au-delà. Capital réparti selon la clause bénéficiaire de chaque contrat.</p>
-      <table class="grid"><thead><tr>
-        <th>Bénéficiaire</th><th>Capital reçu</th><th>Abattement</th><th>Base taxable</th><th>Droits (990 I)</th><th>Net perçu</th>
-      </tr></thead><tbody>
-      ${d.avBeneficiaires.map((x) => `<tr>
-        <td><b>${x.nom}</b></td>
-        <td>${eur(x.capital)}</td>
-        <td>− ${eur(x.abattement)}</td>
-        <td>${eur(x.base)}</td>
-        <td style="color:var(--warn)"><b>${eur(x.droits)}</b></td>
-        <td>${eur(x.net)}</td>
-      </tr>`).join("")}
-      </tbody>
-      <tfoot><tr>
-        <th>Total</th><td>${eur(d.avBeneficiaires.reduce((s, x) => s + x.capital, 0))}</td><td></td><td></td>
-        <td style="color:var(--warn)"><b>${eur(d.totalDroitsAV)}</b></td><td></td>
-      </tr></tfoot>
-      </table>
-      ${d.apres70Reintegre > 0 ? `<p class="muted small" style="margin-top:10px">💡 Primes versées <b>après 70 ans</b> : abattement global de 30 500 €, l'excédent (<b>${eur(d.apres70Reintegre)}</b>) est réintégré à la base successorale ci-dessous (art. 757 B) et taxé au barème succession.</p>` : ""}
-    </div>`
-        : ""
-    }
-
-    <div class="card">
-      <h2>💰 Total des droits à payer & base successorale globale</h2>
-      <div class="result">
-        <div class="line"><span>Assiette taxable des biens (après Dutreil)</span><b>${eur(d.patrimoineTaxable)}</b></div>
-        ${d.apres70Reintegre > 0 ? `<div class="line"><span>+ Assurance-vie après 70 ans réintégrée (art. 757 B)</span><b>+ ${eur(d.apres70Reintegre)}</b></div>` : ""}
-        <div class="line total"><span>📊 Base successorale globale</span><b>${eur(d.baseSuccessoraleGlobale)}</b></div>
-        <div class="line" style="margin-top:8px"><span>Droits de succession (sur base globale)</span><b style="color:var(--warn)">${eur(d.droitsSuccessionGlobaux)}</b></div>
-        <div class="line"><span>Droits assurance-vie avant 70 ans (990 I)</span><b style="color:var(--warn)">${eur(d.totalDroitsAV)}</b></div>
-        <div class="line total"><span>💸 TOTAL des droits à payer</span><b style="color:var(--danger);font-size:18px">${eur(d.totalDroitsTous)}</b></div>
-      </div>
-    </div>
-
-    ${
-      d.scenarios
-        ? (() => {
-            const s = d.scenarios;
-            const match = d.regime === "universelle_attribution" ? "attribution" : (d.regime && d.regime !== "" ? "progressif" : null);
-            const best = ["attribution", "progressif", "simultane"].reduce((a, b) => (s[b].total < s[a].total ? b : a));
-            const row = (key, titre, sous) => `<tr ${key === match ? 'style="background:var(--accent-soft)"' : ""}>
-              <td><b>${titre}</b><br><span class="muted small">${sous}</span></td>
-              <td style="color:var(--warn);white-space:nowrap"><b>${eur(s[key].total)}</b></td>
-              <td>${key === match ? '<span class="badge warn">votre régime</span> ' : ""}${key === best ? '<span class="badge ok">le moins coûteux</span>' : ""}</td>
-            </tr>`;
-            return `<div class="card">
-              <h2>⚖️ Scénarios de transmission aux enfants</h2>
-              <p class="muted small">Selon l'ordre des décès et le régime matrimonial, le coût fiscal total pour les enfants change fortement. Estimation ligne directe sur l'assiette taxable (${eur(d.patrimoineTaxable)}), hors assurance-vie.</p>
-              <table class="grid"><thead><tr><th>Scénario</th><th>Total droits enfants</th><th></th></tr></thead><tbody>
-                ${row("attribution", "Communauté universelle + attribution intégrale", "Tout au conjoint au 1er décès (0 droit), enfants héritent au 2nd → 1 seul abattement de 100 000 €")}
-                ${row("progressif", "Transmission à chaque décès", "Moitié au 1er décès, moitié au 2nd → 2 abattements + tranches basses")}
-                ${row("simultane", "Décès simultané des 2 parents", "Référence : 2 abattements, une seule transmission")}
-              </tbody></table>
-              <p class="muted small">💡 L'attribution intégrale <b>protège le conjoint</b> mais coûte le plus aux enfants (un seul abattement, base pleine). Transmettre progressivement (ou anticiper par donations démembrées) minimise les droits. À arbitrer avec le notaire.</p>
-            </div>`;
-          })()
-        : ""
-    }
-
+    ${!hasData ? `<div class="card"><p class="muted">Commence par saisir ta famille (onglet 👪 Famille) et ton patrimoine (onglet 🏦 Patrimoine). Le résumé se construit automatiquement ici.</p></div>` : ""}
+    ${cockpit}
+    ${mirror}
+    ${diptyque}
+    ${fiche}
+    ${avCard}
+    ${scenarios}
+    ${quiPossede}
+    ${recoCard}
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
         <h2 style="margin:0">🗺️ Organigramme patrimonial</h2>
@@ -699,9 +622,16 @@ async function renderOrganigramme() {
       <p class="muted small">Traits pleins = pleine propriété · pointillés = démembrement (US/NP) · flèches épaisses = donations réalisées.</p>
     </div>`;
 
-  // Rendu Mermaid (import dynamique depuis CDN)
+  // Interactions
   $("#exp_resume")?.addEventListener("click", exporterResume);
+  const tgl = $("#toggle_all");
+  if (tgl) tgl.addEventListener("click", () => {
+    const open = tgl.textContent.includes("déplier");
+    $$("#tab-content details.perso2, #tab-content details.cat2").forEach((el) => (el.open = open));
+    tgl.textContent = open ? "Tout replier" : "Tout déplier";
+  });
 
+  // Rendu Mermaid (import dynamique depuis CDN)
   const box = $("#mermaid-box");
   const def = buildMermaid(state);
   try {
