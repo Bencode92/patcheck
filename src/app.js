@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=37";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=37";
-import { buildMermaid, debrief } from "./graph.js?v=37";
-import * as sync from "./sync.js?v=37";
-import { askAI } from "./ai.js?v=37";
+} from "./data.js?v=38";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=38";
+import { buildMermaid, debrief } from "./graph.js?v=38";
+import * as sync from "./sync.js?v=38";
+import { askAI } from "./ai.js?v=38";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -433,31 +433,40 @@ async function renderOrganigramme() {
     });
     const avPerso = avItems.reduce((s, i) => s + i.val, 0);
     const grand = bienTotal + avPerso;
-    const bienRows = items.map((it) => `<tr>
-      <td>${CAT_LOOKUP[it.categorie] || it.categorie} · ${it.libelle}</td>
-      <td>${it.part} %</td>
-      <td>${it.droit === "PP" ? '<span class="muted small">pleine propriété</span>' : `${droitBadge(it.droit)} <span class="muted small">${Math.round(it.fraction * 100)} % (669, usuf. ${it.usuAge} ans)</span>`}</td>
-      <td style="text-align:right"><b>${eur(it.valeur)}</b>${it.droit !== "PP" ? `<div class="muted small">${it.part}% × ${Math.round(it.fraction * 100)}%</div>` : ""}</td>
-    </tr>`).join("");
-    const avRows = avItems.map((it) => `<tr style="background:rgba(224,72,154,.06)">
-      <td>🛡️ ${it.lib}${it.co ? ' <span class="muted small">(co-adh. ½)</span>' : ""}</td>
-      <td colspan="2"><span class="muted small">assurance-vie · hors succession</span></td>
-      <td style="text-align:right"><b>${eur(it.val)}</b></td>
-    </tr>`).join("");
     const roleLbl = p.role === "parent" ? "Parent" : p.role === "enfant" ? "Enfant" : p.role;
+
+    // Regroupement des biens par catégorie → un toggle par catégorie
+    const byCat = {};
+    items.forEach((it) => (byCat[it.categorie] ||= []).push(it));
+    const catBlocks = Object.entries(byCat).map(([cat, list]) => {
+      const sub = list.reduce((s, i) => s + i.valeur, 0);
+      const rows = list.map((it) => `<tr>
+        <td>${it.libelle}</td>
+        <td>${it.part} %</td>
+        <td>${it.droit === "PP" ? '<span class="muted small">pleine propriété</span>' : `${droitBadge(it.droit)} <span class="muted small">${Math.round(it.fraction * 100)} % (669, usuf. ${it.usuAge} ans)</span>`}</td>
+        <td style="text-align:right"><b>${eur(it.valeur)}</b>${it.droit !== "PP" ? `<div class="muted small">${it.part}% × ${Math.round(it.fraction * 100)}%</div>` : ""}</td>
+      </tr>`).join("");
+      return `<details class="cat-details" open>
+        <summary class="cat-sum"><span>${CAT_LOOKUP[cat] || cat} <span class="muted small">· ${list.length} bien(s)</span></span><b>${eur(sub)}</b></summary>
+        <table class="grid"><thead><tr><th>Bien / actif</th><th>Quote-part</th><th>Droit</th><th style="text-align:right">Valeur détenue</th></tr></thead><tbody>${rows}</tbody></table>
+      </details>`;
+    }).join("");
+    const avBlock = avItems.length ? `<details class="cat-details" open>
+      <summary class="cat-sum"><span>🛡️ Assurance-vie <span class="muted small">· hors succession</span></span><b>${eur(avPerso)}</b></summary>
+      <table class="grid"><tbody>${avItems.map((it) => `<tr>
+        <td>${it.lib}${it.co ? ' <span class="muted small">(co-adhésion ½)</span>' : ""}</td>
+        <td style="text-align:right"><b>${eur(it.val)}</b></td>
+      </tr>`).join("")}</tbody></table>
+    </details>` : "";
+
     return `<details class="perso-details" open>
       <summary class="perso-sum">
         <span><b style="font-size:15px">${p.nom}</b> <span class="badge ${p.role === "parent" ? "warn" : "ok"}">${roleLbl}</span> <span class="muted small">${items.length} bien(s)${avItems.length ? " + AV" : ""}</span></span>
         <b style="color:var(--accent);font-size:16px">${eur(grand)}</b>
       </summary>
       ${(items.length || avItems.length)
-        ? `<table class="grid"><thead><tr><th>Bien / actif détenu</th><th>Quote-part</th><th>Droit</th><th style="text-align:right">Valeur détenue</th></tr></thead><tbody>
-          ${bienRows}${avRows}
-          </tbody>
-          <tfoot>
-            ${avItems.length ? `<tr><td colspan="3" class="muted small">dont biens ${eur(bienTotal)} + assurance-vie ${eur(avPerso)}</td><td></td></tr>` : ""}
-          </tfoot></table>`
-        : `<div class="muted small" style="margin-top:6px">Rien de détenu pour l'instant.</div>`}
+        ? `<div class="perso-body">${catBlocks}${avBlock}</div>`
+        : `<div class="muted small" style="padding:4px 15px 14px">Rien de détenu pour l'instant.</div>`}
     </details>`;
   }).join("");
   // Exposition : SCI regroupées avec l'immobilier, assurance-vie ajoutée comme classe d'actif

@@ -393,7 +393,15 @@ input[type="checkbox"], input[type="radio"] {
 .perso-sum > span:first-child::before { content: "▸"; color: var(--muted); margin-right: 7px; transition: transform .15s; display: inline-block; }
 .perso-details[open] .perso-sum > span:first-child::before { transform: rotate(90deg); }
 .perso-details[open] .perso-sum { border-bottom: 1px solid var(--line); }
-.perso-details > table, .perso-details > .muted { margin: 0 15px 14px; width: calc(100% - 30px); }
+.perso-body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+.cat-details { border: 1px solid var(--line); border-radius: 9px; background: var(--panel); overflow: hidden; }
+.cat-sum { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer; list-style: none; user-select: none; font-size: 14px; }
+.cat-sum::-webkit-details-marker { display: none; }
+.cat-sum > span:first-child::before { content: "▸"; color: var(--muted); margin-right: 6px; display: inline-block; transition: transform .15s; }
+.cat-details[open] .cat-sum > span:first-child::before { transform: rotate(90deg); }
+.cat-details[open] .cat-sum { border-bottom: 1px solid var(--line); }
+.cat-details > table { margin: 0; }
+.cat-details > table td, .cat-details > table th { padding-left: 12px; padding-right: 12px; }
 
 .chat-box { max-height: 460px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 6px 2px; }
 .bubble { max-width: 88%; padding: 11px 15px; border-radius: 14px; font-size: 14px; line-height: 1.5; white-space: normal; }
