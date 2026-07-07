@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=35";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=35";
-import { buildMermaid, debrief } from "./graph.js?v=35";
-import * as sync from "./sync.js?v=35";
-import { askAI } from "./ai.js?v=35";
+} from "./data.js?v=36";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=36";
+import { buildMermaid, debrief } from "./graph.js?v=36";
+import * as sync from "./sync.js?v=36";
+import { askAI } from "./ai.js?v=36";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1496,6 +1496,10 @@ function buildConseilContext(d) {
   });
   L.push(`Capacité de donation encore exonérée (abattements 100 000 € /parent /enfant non utilisés) : ${e(d.capaciteExoneree)}.`);
   if (d.scenarios) L.push(`Scénarios de droits totaux pour les enfants : attribution intégrale au conjoint = ${e(d.scenarios.attribution.total)} ; transmission à chaque décès = ${e(d.scenarios.progressif.total)} ; décès simultané = ${e(d.scenarios.simultane.total)}.`);
+  // Droits estimés par enfant en cas de décès aujourd'hui
+  (d.successionParEnfant || []).forEach((x) => L.push(`Si décès aujourd'hui, ${x.nom} reçoit ${e(x.recu)} et paierait ${e(x.droits)} de droits (net ${e(x.net)}).`));
+  // Pistes déjà détectées automatiquement par l'app
+  if ((d.reco || []).length) L.push("Pistes déjà détectées : " + d.reco.map((r) => r.text.replace(/<[^>]+>/g, "")).join(" ; ") + ".");
   return L.join("\n");
 }
 
@@ -1535,7 +1539,11 @@ function renderConseil() {
     <div class="card">
       <h2>🤖 Discuter avec l'IA</h2>
       ${aiConfig
-        ? `<p class="muted small">Pose tes questions et tes hypothèses (« et si je donne 100 000 € à chacun ? »). L'IA raisonne sur TES données ci-dessus. Réponses indicatives — à valider avec un notaire.</p>
+        ? `<button id="strat_go" class="btn primary" style="margin-bottom:6px">⚡ Générer ma stratégie d'optimisation</button>
+           <p class="muted small">Un plan concret et chiffré, calé sur tes priorités et tes données. Indicatif — à valider avec un notaire.</p>
+           <div id="strategie" style="margin:8px 0 4px"></div>
+           <hr style="border:none;border-top:1px solid var(--line);margin:18px 0 14px">
+           <p class="muted small">Ou pose tes questions / hypothèses (« et si je donne 100 000 € à chacun ? »).</p>
            <div class="chips" style="margin-bottom:12px">
              ${["Fais une synthèse et donne-moi les 3 leviers prioritaires", "Si un parent décède demain, qui paie quoi ?", "Comment réduire les droits sur l'entreprise ?", "Quel intérêt à donner la nue-propriété maintenant ?"].map((q) => `<button class="chip suggest" style="cursor:pointer">${q}</button>`).join("")}
            </div>
@@ -1560,6 +1568,15 @@ function renderConseil() {
   };
   renderChat();
 
+  const buildSystem = () => {
+    const objTxt = [...conseilObjectifs].join(", ") || "réduire les droits et transmettre au mieux";
+    return `Tu es un conseiller en gestion de patrimoine et transmission (droit français, barèmes 2026). Tu aides une famille à comprendre et optimiser sa situation.
+Règles : utilise UNIQUEMENT les données du contexte pour tout chiffre ; si une donnée manque, dis-le. Explique simplement, avec des ordres de grandeur chiffrés. Propose des leviers concrets et priorisés : donation démembrée (nue-propriété, barème 669), abattements 100 000 € /parent /enfant tous les 15 ans, don familial de somme 790 G (31 865 €), assurance-vie (abattement 152 500 €/bénéficiaire avant 70 ans), pacte Dutreil (−75 % sur les titres d'entreprise), choix du régime matrimonial, exonération temporaire logement 790 A bis (jusqu'au 31/12/2026). Sois concis. Priorités de la famille : ${objTxt}. Termine les recommandations importantes par « à valider avec un notaire ». Tu ne donnes pas de conseil juridique définitif.
+
+=== CONTEXTE PATRIMONIAL ===
+${buildConseilContext(d)}`;
+  };
+
   const send = async (question) => {
     const q = (question || $("#chat_in").value).trim();
     if (!q) return;
@@ -1568,14 +1585,8 @@ function renderConseil() {
     conseilMessages.push({ role: "assistant", content: "…réflexion en cours…" });
     renderChat();
     $("#chat_send").disabled = true;
-    const objTxt = [...conseilObjectifs].join(", ") || "réduire les droits et transmettre au mieux";
-    const system = `Tu es un conseiller en gestion de patrimoine et transmission (droit français, barèmes 2026). Tu aides une famille à comprendre et optimiser sa situation.
-Règles : utilise UNIQUEMENT les données du contexte pour tout chiffre ; si une donnée manque, dis-le. Explique simplement, avec des ordres de grandeur chiffrés. Propose des leviers concrets et priorisés : donation démembrée (nue-propriété, barème 669), abattements 100 000 € /parent /enfant tous les 15 ans, don familial de somme 790 G (31 865 €), assurance-vie (abattement 152 500 €/bénéficiaire avant 70 ans), pacte Dutreil (−75 % sur les titres d'entreprise), choix du régime matrimonial, exonération temporaire logement 790 A bis (jusqu'au 31/12/2026). Structure : situation → leviers → impact chiffré. Sois concis. Priorités de la famille : ${objTxt}. Termine les recommandations importantes par « à valider avec un notaire ». Tu ne donnes pas de conseil juridique définitif.
-
-=== CONTEXTE PATRIMONIAL ===
-${buildConseilContext(d)}`;
     try {
-      const answer = await askAI(system, conseilMessages.filter((m) => m.content !== "…réflexion en cours…"));
+      const answer = await askAI(buildSystem(), conseilMessages.filter((m) => m.content !== "…réflexion en cours…"));
       conseilMessages[conseilMessages.length - 1] = { role: "assistant", content: answer || "(réponse vide)" };
     } catch (err) {
       conseilMessages[conseilMessages.length - 1] = { role: "assistant", content: "⚠️ " + err.message };
@@ -1583,6 +1594,27 @@ ${buildConseilContext(d)}`;
     $("#chat_send").disabled = false;
     renderChat();
   };
+
+  $("#strat_go").addEventListener("click", async () => {
+    const box = $("#strategie");
+    const btn = $("#strat_go");
+    btn.disabled = true;
+    box.innerHTML = `<div class="muted small">⚙️ L'IA construit ta stratégie…</div>`;
+    const prompt = `En te basant sur ma situation et mes priorités, rédige ma STRATÉGIE D'OPTIMISATION de transmission, structurée ainsi :
+1. **Diagnostic** (3 lignes max : où en est le patrimoine, quel est l'enjeu fiscal principal).
+2. **Leviers prioritaires** : 3 à 5 actions, de la plus rentable à la moins, avec pour chacune l'**économie estimée en €** (fondée sur mes chiffres).
+3. **Plan d'action** : étapes concrètes dans l'ordre (quoi faire cette année, puis dans 15 ans, etc.).
+4. **Impact par personne** : ce que ça change pour le conjoint et pour chaque enfant.
+5. **Points de vigilance**.
+Sois concret et chiffré.`;
+    try {
+      const answer = await askAI(buildSystem(), [{ role: "user", content: prompt }]);
+      box.innerHTML = `<div class="bubble assistant" style="max-width:100%">${mdLite(answer || "(réponse vide)")}</div>`;
+    } catch (err) {
+      box.innerHTML = `<div class="result"><b style="color:var(--danger)">⚠️ ${err.message}</b></div>`;
+    }
+    btn.disabled = false;
+  });
 
   $("#chat_send").addEventListener("click", () => send());
   $("#chat_in").addEventListener("keydown", (e2) => { if (e2.key === "Enter" && (e2.metaKey || e2.ctrlKey)) send(); });
