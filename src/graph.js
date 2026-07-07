@@ -1,7 +1,7 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE } from "./data.js?v=24";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE } from "./data.js?v=25";
 
 // Taux d'exonération Dutreil (art. 787 B) sur les titres de société éligibles
 const DUTREIL_EXO = 0.75;
@@ -116,14 +116,17 @@ export function debrief(state) {
   // Patrimoine NET détenu par les personnes (biens logés en SCI non recomptés :
   // les personnes détiennent les parts de SCI ; dette de la SCI déjà déduite).
   const parPersonne = {};
-  personnes.forEach((p) => (parPersonne[p.id] = 0));
+  const parPersonneDetail = {};
+  personnes.forEach((p) => { parPersonne[p.id] = 0; parPersonneDetail[p.id] = []; });
   let patrimoineFoyer = 0;
   detentions.forEach((d) => {
     if (!estPersonne(d.proprietaire)) return; // détenu par une SCI -> ignoré au niveau foyer
-    if (!actif(d.actifRef)) return;
+    const a = actif(d.actifRef);
+    if (!a) return;
     const val = (actifNet(d.actifRef) * d.part) / 100;
     parPersonne[d.proprietaire] += val;
     patrimoineFoyer += val;
+    parPersonneDetail[d.proprietaire].push({ libelle: a.libelle || a.id, categorie: a.categorie, part: d.part, droit: d.droit, valeur: val });
   });
   // Dettes personnelles
   Object.entries(detteParPersonne).forEach(([pid, m]) => {
@@ -271,6 +274,7 @@ export function debrief(state) {
     exonerationDutreil,
     totalDettes,
     regime: state.regime || "",
+    parPersonneDetail,
     scenarios,
     reco,
     parPersonne,

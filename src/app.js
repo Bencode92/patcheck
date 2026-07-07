@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=24";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=24";
-import { buildMermaid, debrief } from "./graph.js?v=24";
-import * as sync from "./sync.js?v=24";
+} from "./data.js?v=25";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=25";
+import { buildMermaid, debrief } from "./graph.js?v=25";
+import * as sync from "./sync.js?v=25";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -401,9 +401,29 @@ async function renderOrganigramme() {
   const d = debrief(state);
   const eur = (n) => Math.round(n || 0).toLocaleString("fr-FR") + " €";
 
-  const persoRows = state.personnes
-    .map((p) => `<div class="line"><span>${p.nom} <small class="muted">(${p.role})</small></span><b>${eur(d.parPersonne[p.id] || 0)}</b></div>`)
-    .join("");
+  const DROIT_LBL = { PP: "Pleine propriété", US: "Usufruit", NP: "Nue-propriété" };
+  const droitBadge = (dr) => dr === "PP" ? "" : `<span class="badge warn">${DROIT_LBL[dr] || dr}</span>`;
+  const persoDetailCard = state.personnes.map((p) => {
+    const items = (d.parPersonneDetail[p.id] || []).slice().sort((a, b) => b.valeur - a.valeur);
+    const avOwned = (state.av || []).filter((a) => a.souscripteurId === p.id || a.cosouscripteurId === p.id);
+    return `<div class="asset-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <b style="font-size:15px">${p.nom} <span class="muted small">(${p.role})</span></b>
+        <b style="color:var(--accent);font-size:16px">${eur(d.parPersonne[p.id] || 0)}</b>
+      </div>
+      ${items.length
+        ? `<table class="grid"><thead><tr><th>Bien détenu</th><th>Part</th><th>Droit</th><th style="text-align:right">Valeur détenue</th></tr></thead><tbody>
+          ${items.map((it) => `<tr>
+            <td>${CAT_LOOKUP[it.categorie] || it.categorie} · ${it.libelle}</td>
+            <td>${it.part} %</td>
+            <td>${it.droit === "PP" ? '<span class="muted small">pleine propriété</span>' : droitBadge(it.droit)}</td>
+            <td style="text-align:right"><b>${eur(it.valeur)}</b></td>
+          </tr>`).join("")}
+          </tbody></table>`
+        : `<div class="muted small" style="margin-top:6px">Aucun bien détenu directement.</div>`}
+      ${avOwned.length ? `<div class="muted small" style="margin-top:8px">🛡️ Assurance-vie souscrite : ${avOwned.map((a) => `${a.libelle || "contrat"} (${eur(a.montant)}${a.cosouscripteurId ? ", co-adhésion" : ""})`).join(" · ")}</div>` : ""}
+    </div>`;
+  }).join("");
   // Exposition : SCI regroupées avec l'immobilier, assurance-vie ajoutée comme classe d'actif
   const hasSci = (d.parCategorie.sci || 0) > 0;
   const avTotal = (d.avAvant70 || 0) + (d.avApres70 || 0);
@@ -440,14 +460,13 @@ async function renderOrganigramme() {
         ? ""
         : `<div class="card"><b>Aucune donnée patrimoniale.</b> Commence par les onglets <b>👪 Famille</b> puis <b>🏦 Patrimoine</b>.</div>`
     }
+    <div class="card">
+      <h2>👥 Qui possède quoi — détail par personne</h2>
+      <p class="muted small">Répartition détenue par chaque personne (biens en direct + parts de SCI/société, avec démembrement). Total foyer : <b>${eur(d.patrimoineFoyer)}</b>.</p>
+      ${persoDetailCard}
+    </div>
+
     <div class="grid-2">
-      <div class="card">
-        <h3>💰 Patrimoine par personne</h3>
-        <div class="result">${persoRows}
-          <div class="line total"><span>Total foyer</span><b>${eur(d.patrimoineFoyer)}</b></div>
-        </div>
-        <p class="muted small">Les biens logés dans une SCI ne sont pas recomptés : chacun détient des <i>parts</i> de SCI.</p>
-      </div>
       <div class="card">
         <h3>📊 Exposition patrimoniale</h3>
         ${catRows}
