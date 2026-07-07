@@ -2,10 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=34";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=34";
-import { buildMermaid, debrief } from "./graph.js?v=34";
-import * as sync from "./sync.js?v=34";
+} from "./data.js?v=35";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=35";
+import { buildMermaid, debrief } from "./graph.js?v=35";
+import * as sync from "./sync.js?v=35";
+import { askAI } from "./ai.js?v=35";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -171,6 +172,7 @@ function simulerAvAvant70(montant) {
 // =============================================================
 const TABS = [
   { id: "organigramme", label: "🏠 Résumé patrimonial" },
+  { id: "conseil", label: "🤖 Conseil & optimisation" },
   { id: "famille", label: "👪 Famille" },
   { id: "patrimoine", label: "🏦 Patrimoine" },
   { id: "entreprise", label: "🏭 Entreprise" },
@@ -203,6 +205,7 @@ function render() {
   ({
     donnees: renderDonnees,
     organigramme: renderOrganigramme,
+    conseil: renderConseil,
     famille: renderFamille,
     patrimoine: renderPatrimoine,
     entreprise: renderEntreprise,
@@ -1455,6 +1458,135 @@ function renderEntreprise() {
       save(); renderEntreprise();
     }
   };
+}
+
+// ---------- Onglet Conseil & optimisation (IA) ----------
+const conseilMessages = []; // conversation en mémoire (non sauvegardée)
+const conseilObjectifs = new Set(["Minimiser les droits de succession"]);
+const OBJECTIFS = [
+  "Minimiser les droits de succession",
+  "Protéger le conjoint survivant",
+  "Égalité entre les enfants",
+  "Garder des revenus / le contrôle",
+  "Préparer une vente / de la liquidité",
+  "Anticiper par des donations",
+];
+
+function buildConseilContext(d) {
+  const e = (n) => Math.round(n || 0).toLocaleString("fr-FR") + " €";
+  const avTotal = (d.avAvant70 || 0) + (d.avApres70 || 0);
+  const L = [];
+  L.push(`Régime matrimonial des parents : ${REGIME_LABEL[d.regime] || "non précisé"}.`);
+  L.push(`Patrimoine net des biens : ${e(d.patrimoineFoyer)}. Assurance-vie : ${e(avTotal)} (avant 70 ans ${e(d.avAvant70)}, après 70 ans ${e(d.avApres70)}). Patrimoine global : ${e(d.patrimoineFoyer + avTotal)}.`);
+  L.push(`Dettes totales : ${e(d.totalDettes)}.${d.exonerationDutreil > 0 ? ` Exonération Dutreil : ${e(d.exonerationDutreil)}.` : ""}`);
+  L.push(`Assiette taxable succession (hors assurance-vie) : ${e(d.patrimoineTaxable)}. Droits de succession estimés aujourd'hui : ${e(d.droitsSuccessionEstimes)}.`);
+  const cats = Object.entries(d.parCategorie).map(([k, v]) => `${k} ${e(v)}`).join(", ");
+  if (cats) L.push(`Exposition par catégorie : ${cats}.`);
+  state.personnes.forEach((p) => {
+    const items = d.parPersonneDetail[p.id] || [];
+    if (items.length) L.push(`${p.nom} (${p.role}) détient : ` + items.map((it) => `${it.libelle} ${it.part}% ${it.droit}${it.droit !== "PP" ? ` [669 ${Math.round(it.fraction * 100)}%]` : ""} = ${e(it.valeur)}`).join(" ; ") + ".");
+  });
+  (state.av || []).forEach((a) => {
+    const bens = (a.beneficiaires || []).map((b) => { const nom = personne(b)?.nom || b; const pc = a.repartition?.[b]; return pc ? `${nom} ${pc}%` : nom; }).join(" / ");
+    L.push(`Assurance-vie "${a.libelle || a.id}" chez ${a.etablissement || "?"}, souscripteur ${personne(a.souscripteurId)?.nom || "?"}${a.cosouscripteurId ? " & " + (personne(a.cosouscripteurId)?.nom || "") : ""}, capital ${e(a.montant)}, primes ${a.avant70 ? "avant" : "après"} 70 ans, bénéficiaires : ${bens || "à définir"}.`);
+  });
+  (state.donations || []).forEach((x) => {
+    const purge = anneesEcoulees(x.date) >= DELAI_RAPPEL_ANS;
+    L.push(`Donation ${x.date} : ${personne(x.donateurId)?.nom || "?"} → ${personne(x.beneficiaireId)?.nom || "?"}, ${e(x.montant)} (${purge ? "purgée >15 ans" : "rapportable <15 ans"}).`);
+  });
+  L.push(`Capacité de donation encore exonérée (abattements 100 000 € /parent /enfant non utilisés) : ${e(d.capaciteExoneree)}.`);
+  if (d.scenarios) L.push(`Scénarios de droits totaux pour les enfants : attribution intégrale au conjoint = ${e(d.scenarios.attribution.total)} ; transmission à chaque décès = ${e(d.scenarios.progressif.total)} ; décès simultané = ${e(d.scenarios.simultane.total)}.`);
+  return L.join("\n");
+}
+
+const mdLite = (s) => String(s || "")
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+  .replace(/^\s*[-*]\s+/gm, "• ")
+  .replace(/\n/g, "<br>");
+
+function renderConseil() {
+  const c = $("#tab-content");
+  const d = debrief(state);
+  const eur2 = (n) => Math.round(n || 0).toLocaleString("fr-FR") + " €";
+  const avTotal = (d.avAvant70 || 0) + (d.avApres70 || 0);
+  const aiConfig = sync.getApiUrl() && sync.getApiUrl() !== "/api/data" && sync.getPassword();
+
+  c.innerHTML = `
+    <div class="card">
+      <h2>📌 Ta situation en clair</h2>
+      <div class="result">
+        <div class="line"><span>Patrimoine global (biens + assurance-vie)</span><b>${eur2(d.patrimoineFoyer + avTotal)}</b></div>
+        <div class="line"><span>Régime matrimonial</span><b>${REGIME_LABEL[d.regime] || "non précisé"}</b></div>
+        <div class="line"><span>Assiette taxable succession (hors AV)</span><b>${eur2(d.patrimoineTaxable)}</b></div>
+        <div class="line"><span>Droits de succession estimés aujourd'hui</span><b style="color:var(--warn)">${eur2(d.droitsSuccessionEstimes)}</b></div>
+        <div class="line"><span>Encore donnable en franchise (abattements 15 ans)</span><b style="color:var(--accent-2)">${eur2(d.capaciteExoneree)}</b></div>
+        ${d.scenarios ? `<div class="line total"><span>Coût enfants — meilleur vs pire scénario</span><b>${eur2(Math.min(d.scenarios.progressif.total, d.scenarios.simultane.total, d.scenarios.attribution.total))} → ${eur2(Math.max(d.scenarios.progressif.total, d.scenarios.simultane.total, d.scenarios.attribution.total))}</b></div>` : ""}
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>🎯 Tes priorités <span class="muted small">(orientent les conseils de l'IA)</span></h3>
+      <div class="benef-row">
+        ${OBJECTIFS.map((o) => `<label class="benef-chk"><input type="checkbox" class="obj" data-o="${o}" ${conseilObjectifs.has(o) ? "checked" : ""}> ${o}</label>`).join("")}
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>🤖 Discuter avec l'IA</h2>
+      ${aiConfig
+        ? `<p class="muted small">Pose tes questions et tes hypothèses (« et si je donne 100 000 € à chacun ? »). L'IA raisonne sur TES données ci-dessus. Réponses indicatives — à valider avec un notaire.</p>
+           <div class="chips" style="margin-bottom:12px">
+             ${["Fais une synthèse et donne-moi les 3 leviers prioritaires", "Si un parent décède demain, qui paie quoi ?", "Comment réduire les droits sur l'entreprise ?", "Quel intérêt à donner la nue-propriété maintenant ?"].map((q) => `<button class="chip suggest" style="cursor:pointer">${q}</button>`).join("")}
+           </div>
+           <div id="chat" class="chat-box"></div>
+           <div class="form-row" style="margin-top:12px;align-items:flex-end">
+             <label style="flex:1">Ta question<textarea id="chat_in" rows="2" placeholder="ex : combien chaque enfant paierait au 2nd décès ?"></textarea></label>
+             <button id="chat_send" class="btn primary">Envoyer</button>
+           </div>`
+        : `<p class="muted">L'IA nécessite ton Worker Cloudflare + le secret <b>ANTHROPIC_API_KEY</b> (voir README). Renseigne aussi l'URL et le mot de passe dans l'onglet <b>📥 Données</b>.</p>`}
+    </div>`;
+
+  $$("#tab-content .obj").forEach((el) => el.addEventListener("change", (e2) => {
+    e2.target.checked ? conseilObjectifs.add(e2.target.dataset.o) : conseilObjectifs.delete(e2.target.dataset.o);
+  }));
+
+  if (!aiConfig) return;
+
+  const chat = $("#chat");
+  const renderChat = () => {
+    chat.innerHTML = conseilMessages.map((m) => `<div class="bubble ${m.role}">${m.role === "assistant" ? mdLite(m.content) : mdLite(m.content)}</div>`).join("") || `<div class="muted small center">Pose une question ou clique une suggestion ci-dessus.</div>`;
+    chat.scrollTop = chat.scrollHeight;
+  };
+  renderChat();
+
+  const send = async (question) => {
+    const q = (question || $("#chat_in").value).trim();
+    if (!q) return;
+    $("#chat_in").value = "";
+    conseilMessages.push({ role: "user", content: q });
+    conseilMessages.push({ role: "assistant", content: "…réflexion en cours…" });
+    renderChat();
+    $("#chat_send").disabled = true;
+    const objTxt = [...conseilObjectifs].join(", ") || "réduire les droits et transmettre au mieux";
+    const system = `Tu es un conseiller en gestion de patrimoine et transmission (droit français, barèmes 2026). Tu aides une famille à comprendre et optimiser sa situation.
+Règles : utilise UNIQUEMENT les données du contexte pour tout chiffre ; si une donnée manque, dis-le. Explique simplement, avec des ordres de grandeur chiffrés. Propose des leviers concrets et priorisés : donation démembrée (nue-propriété, barème 669), abattements 100 000 € /parent /enfant tous les 15 ans, don familial de somme 790 G (31 865 €), assurance-vie (abattement 152 500 €/bénéficiaire avant 70 ans), pacte Dutreil (−75 % sur les titres d'entreprise), choix du régime matrimonial, exonération temporaire logement 790 A bis (jusqu'au 31/12/2026). Structure : situation → leviers → impact chiffré. Sois concis. Priorités de la famille : ${objTxt}. Termine les recommandations importantes par « à valider avec un notaire ». Tu ne donnes pas de conseil juridique définitif.
+
+=== CONTEXTE PATRIMONIAL ===
+${buildConseilContext(d)}`;
+    try {
+      const answer = await askAI(system, conseilMessages.filter((m) => m.content !== "…réflexion en cours…"));
+      conseilMessages[conseilMessages.length - 1] = { role: "assistant", content: answer || "(réponse vide)" };
+    } catch (err) {
+      conseilMessages[conseilMessages.length - 1] = { role: "assistant", content: "⚠️ " + err.message };
+    }
+    $("#chat_send").disabled = false;
+    renderChat();
+  };
+
+  $("#chat_send").addEventListener("click", () => send());
+  $("#chat_in").addEventListener("keydown", (e2) => { if (e2.key === "Enter" && (e2.metaKey || e2.ctrlKey)) send(); });
+  $$("#tab-content .suggest").forEach((b) => b.addEventListener("click", () => send(b.textContent)));
 }
 
 // ---------- Onglet Par banque / établissement ----------

@@ -4,7 +4,8 @@
 //
 //  Configuration requise sur le Worker :
 //   - Binding KV nommé  PATCHECK_KV
-//   - Secret            APP_PASSWORD  (mot de passe d'accès)
+//   - Secret            APP_PASSWORD      (mot de passe d'accès)
+//   - Secret            ANTHROPIC_API_KEY (facultatif — active l'IA Conseil)
 //
 //  L'app (onglet Données → Sauvegarde en ligne) appelle l'URL
 //  de ce Worker (…​.workers.dev) avec l'en-tête x-app-password.
@@ -14,7 +15,7 @@ const KEY = "patcheck-data";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, PUT, HEAD, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, PUT, POST, HEAD, OPTIONS",
   "Access-Control-Allow-Headers": "content-type, x-app-password",
   "Access-Control-Max-Age": "86400",
 };
@@ -47,6 +48,34 @@ export default {
       try { JSON.parse(body); } catch { return json({ error: "Corps non JSON" }, 400); }
       await env.PATCHECK_KV.put(KEY, body);
       return json({ ok: true, savedAt: new Date().toISOString() });
+    }
+
+    // POST = requête IA Conseil (proxy vers Claude, clé API côté serveur)
+    if (request.method === "POST") {
+      if (!ok) return json({ error: "Mot de passe invalide" }, 401);
+      if (!env.ANTHROPIC_API_KEY) return json({ error: "IA non configurée : ajoute le secret ANTHROPIC_API_KEY sur le Worker." }, 501);
+      let payload;
+      try { payload = await request.json(); } catch { return json({ error: "Corps non JSON" }, 400); }
+      const messages = Array.isArray(payload.messages) ? payload.messages.slice(-20) : [];
+      if (!messages.length) return json({ error: "Aucun message" }, 400);
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: "claude-opus-4-8",
+          max_tokens: 3000,
+          system: String(payload.system || "").slice(0, 40000),
+          messages,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) return json({ error: (data && data.error && data.error.message) || "Erreur API Claude" }, 502);
+      const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
+      return json({ text });
     }
 
     return json({ error: "Méthode non supportée" }, 405);
