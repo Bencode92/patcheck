@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=18";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=18";
-import { buildMermaid, debrief } from "./graph.js?v=18";
-import * as sync from "./sync.js?v=18";
+} from "./data.js?v=19";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=19";
+import { buildMermaid, debrief } from "./graph.js?v=19";
+import * as sync from "./sync.js?v=19";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -779,7 +779,6 @@ function renderPatrimoine() {
   // Regroupement des biens par catégorie (repliables)
   const items = A.map((a, ai) => ({ a, ai }));
   const catsPresentes = CATEGORIES.map(([k]) => k).filter((k) => items.some((it) => it.a.categorie === k));
-  const autres = items.filter((it) => !CAT_LOOKUP[it.a.categorie]); // catégories inconnues -> "autre"
   const groupesHtml = catsPresentes.map((key) => {
     const grp = items.filter((it) => it.a.categorie === key);
     const total = grp.reduce((s, it) => s + (Number(it.a.valeur) || 0), 0);
@@ -825,6 +824,7 @@ function renderPatrimoine() {
       if (kind === "actif") {
         A.push({ id: uid(), libelle: "", categorie: "immobilier", valeur: 0, annee: null, dutreil: false });
         state.actifs = A;
+        collapsedCats.delete("immobilier"); // déplie le groupe pour que le nouveau bien soit visible
       } else if (kind === "detenteur") {
         const a = A[+add.dataset.ai];
         D.push({ proprietaire: state.personnes.find((p) => p.role === "parent")?.id || state.personnes[0]?.id || "", actifRef: a.id, part: 100, droit: "PP" });
