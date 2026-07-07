@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=16";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=16";
-import { buildMermaid, debrief } from "./graph.js?v=16";
-import * as sync from "./sync.js?v=16";
+} from "./data.js?v=17";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=17";
+import { buildMermaid, debrief } from "./graph.js?v=17";
+import * as sync from "./sync.js?v=17";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -74,7 +74,9 @@ let cloudStatusCb = null;
 function save() {
   state._ts = Date.now(); // horodatage : sert à savoir quelle version est la plus récente
   localStorage.setItem(KEY, JSON.stringify(state));
-  sync.scheduleAutoSave(() => state, (s, info) => cloudStatusCb?.(s, info));
+  try {
+    sync.scheduleAutoSave(() => state, (s, info) => { try { cloudStatusCb?.(s, info); } catch {} });
+  } catch { /* la synchro cloud ne doit jamais casser l'app */ }
 }
 const personne = (id) => state.personnes.find((p) => p.id === id);
 const parents = () => state.personnes.filter((p) => p.role === "parent");
@@ -347,7 +349,7 @@ function renderCloudCard() {
     </div>
     <div id="cl_status" class="muted small"></div>`;
 
-  const status = (msg, color = "var(--muted)") => ($("#cl_status").innerHTML = `<span style="color:${color}">${msg}</span>`);
+  const status = (msg, color = "var(--muted)") => { const el = $("#cl_status"); if (el) el.innerHTML = `<span style="color:${color}">${msg}</span>`; };
   const syncFields = () => {
     const u = $("#cl_url").value.trim();
     sync.setApiUrl(u || "/api/data");
