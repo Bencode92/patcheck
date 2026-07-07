@@ -1,7 +1,7 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=40";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=41";
 
 // Année de naissance : la DATE complète prime (plus précise), puis année seule, puis âge
 function birthYear(p) {
@@ -246,11 +246,14 @@ export function debrief(state) {
   // Exonération Dutreil : 75 % de la valeur des titres d'entreprise éligibles
   // détenus par des personnes physiques sortent de la base taxable.
   let exonerationDutreil = 0;
+  let dutreilAssiette = 0; // valeur du capital entreprise éligible (avant exonération)
   detentions.forEach((d) => {
     if (!estPersonne(d.proprietaire)) return;
     const a = actif(d.actifRef);
     if (a && a.categorie === "entreprise" && a.dutreil) {
-      exonerationDutreil += (DUTREIL_EXO * actifNet(d.actifRef) * d.part) / 100;
+      const v = (actifNet(d.actifRef) * d.part) / 100;
+      dutreilAssiette += v;
+      exonerationDutreil += DUTREIL_EXO * v;
     }
   });
   const patrimoineTaxable = Math.max(0, patrimoineFoyer - exonerationDutreil);
@@ -361,6 +364,7 @@ export function debrief(state) {
     patrimoineFoyer,
     patrimoineTaxable,
     exonerationDutreil,
+    dutreilAssiette,
     totalDettes,
     regime: state.regime || "",
     parPersonneDetail,

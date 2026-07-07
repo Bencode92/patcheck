@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=40";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=40";
-import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=40";
-import * as sync from "./sync.js?v=40";
-import { askAI } from "./ai.js?v=40";
+} from "./data.js?v=41";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=41";
+import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=41";
+import * as sync from "./sync.js?v=41";
+import { askAI } from "./ai.js?v=41";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -518,7 +518,8 @@ async function renderOrganigramme() {
     <div class="small muted" style="margin-bottom:10px">Comment on passe du patrimoine au total à payer.</div>
     <div class="fiche">
       <div class="row"><span class="k">Patrimoine net des biens</span><span class="v num">${eur(d.patrimoineFoyer)}</span></div>
-      ${d.exonerationDutreil > 0 ? `<div class="row sub"><span class="k">Exonération Dutreil (−75 % titres éligibles)</span><span class="v num pos">−${eur(d.exonerationDutreil)}</span></div>` : ""}
+      ${d.exonerationDutreil > 0 ? `<div class="row sub"><span class="k">dont capital entreprise éligible Dutreil</span><span class="v num">${eur(d.dutreilAssiette)}</span></div>
+      <div class="row sub"><span class="k">Exonération Dutreil (−75 % de ce capital entreprise)</span><span class="v num pos">−${eur(d.exonerationDutreil)}</span></div>` : ""}
       ${d.apres70Reintegre > 0 ? `<div class="row sub"><span class="k">AV après 70 ans réintégrée (au-delà de 30 500 €)</span><span class="v num amb">+${eur(d.apres70Reintegre)}</span></div>` : ""}
       <div class="row"><span class="k">Base successorale globale</span><span class="v num">${eur(d.baseSuccessoraleGlobale)}</span></div>
       <div class="row sub"><span class="k">Droits de succession (enfants, après abattements)</span><span class="v num">${eur(d.droitsSuccessionGlobaux)}</span></div>
