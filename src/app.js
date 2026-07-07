@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=19";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=19";
-import { buildMermaid, debrief } from "./graph.js?v=19";
-import * as sync from "./sync.js?v=19";
+} from "./data.js?v=20";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=20";
+import { buildMermaid, debrief } from "./graph.js?v=20";
+import * as sync from "./sync.js?v=20";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -159,6 +159,7 @@ const TABS = [
   { id: "famille", label: "👪 Famille" },
   { id: "patrimoine", label: "🏦 Patrimoine" },
   { id: "assurancevie", label: "🛡️ Assurance-vie" },
+  { id: "banques", label: "🏛️ Par banque" },
   { id: "donations", label: "🎁 Donations réalisées" },
   { id: "abattements", label: "📊 Abattements dispo." },
   { id: "simulateur", label: "🧮 Simulateur" },
@@ -192,6 +193,7 @@ function render() {
     abattements: renderAbattements,
     simulateur: renderSimulateur,
     assurancevie: renderAv,
+    banques: renderBanques,
     baremes: renderBaremes,
   })[currentTab]();
 }
@@ -701,6 +703,10 @@ const actifList = () => (state.actifs || []).map((a) => [a.id, (a.libelle || a.i
 const CAT_LOOKUP = Object.fromEntries(CATEGORIES);
 const collapsedCats = new Set(); // catégories repliées (état d'affichage, non sauvegardé)
 
+const ETABLISSEMENTS = ["Generali", "Société Générale", "BNP Paribas", "Aviva", "Trading 212", "AXA", "Natixis"];
+const datalistEtabs = () => `<datalist id="etabs">${ETABLISSEMENTS.map((e) => `<option value="${e}">`).join("")}</datalist>`;
+const CAT_A_BANQUE = new Set(["titres", "liquidites"]); // catégories où une banque/courtier a du sens
+
 const REGIMES = [
   ["", "— non précisé —"],
   ["acquets", "Communauté réduite aux acquêts (régime légal)"],
@@ -746,6 +752,7 @@ function renderPatrimoine() {
         <input class="f_lib" data-ai="${ai}" placeholder="Libellé (ex : Résidence principale)" value="${a.libelle || ""}">
         <input class="f_val" data-ai="${ai}" inputmode="numeric" placeholder="${a.categorie === "immobilier" ? "Valeur marchande €" : "Valeur €"}" value="${a.valeur || ""}" style="max-width:150px">
         ${a.categorie === "immobilier" ? `<input class="f_pxacq" data-ai="${ai}" inputmode="numeric" placeholder="Prix d'achat €" value="${a.prixAcq ?? ""}" style="max-width:130px">` : ""}
+        ${CAT_A_BANQUE.has(a.categorie) ? `<input class="f_etab" data-ai="${ai}" list="etabs" placeholder="Banque / Courtier" value="${a.etablissement || ""}" style="max-width:160px">` : ""}
         <input class="f_an" data-ai="${ai}" type="number" min="1900" max="${yr}" placeholder="Année acquis." value="${a.annee ?? ""}" style="max-width:120px">
         ${a.categorie === "entreprise" ? `<label class="benef-chk"><input type="checkbox" class="f_dut" data-ai="${ai}" ${a.dutreil ? "checked" : ""}> Dutreil −75%</label>` : ""}
         <button class="danger-link" data-del="actif" data-ai="${ai}" title="Supprimer ce bien">🗑</button>
@@ -795,6 +802,7 @@ function renderPatrimoine() {
   }).join("");
 
   c.innerHTML = `
+    ${datalistEtabs()}
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
         <h2 style="margin:0">🏦 Patrimoine — biens, détention & dettes</h2>
@@ -861,6 +869,7 @@ function renderPatrimoine() {
       if (t.classList.contains("f_lib")) a.libelle = t.value;
       else if (t.classList.contains("f_val")) a.valeur = parseNum(t.value);
       else if (t.classList.contains("f_pxacq")) a.prixAcq = t.value === "" ? null : parseNum(t.value);
+      else if (t.classList.contains("f_etab")) a.etablissement = t.value;
       else if (t.classList.contains("f_an")) a.annee = t.value === "" ? null : Number(t.value);
       else return;
       // met à jour la plus-value affichée sans re-render (garde le focus)
@@ -1122,6 +1131,7 @@ function renderAv() {
       })
       .join("");
   c.innerHTML = `
+    ${datalistEtabs()}
     <div class="card">
       <h2>🛡️ Mes contrats d'assurance-vie</h2>
       <p class="muted small">Renseigne chaque contrat, son souscripteur, le capital, le régime (avant/après 70 ans) et coche les <b>bénéficiaires</b> (clause bénéficiaire).</p>
@@ -1129,7 +1139,7 @@ function renderAv() {
         <div class="av-edit" data-i="${i}">
           <div class="form-row">
             <label>Libellé<input class="av_lib" value="${a.libelle || ""}" placeholder="ex : Contrat retraite"></label>
-            <label>Banque / Assureur<input class="av_etab" value="${a.etablissement || ""}" placeholder="ex : Linxea, BNP…"></label>
+            <label>Banque / Assureur<input class="av_etab" list="etabs" value="${a.etablissement || ""}" placeholder="ex : Generali, AXA…"></label>
             <label>Souscripteur<select class="av_sous">${opt(state.personnes.map((p) => [p.id, p.nom]), a.souscripteurId)}</select></label>
             <label>Co-souscripteur (co-adhésion)<select class="av_cosous"><option value="" ${!a.cosouscripteurId ? "selected" : ""}>— aucun —</option>${opt(state.personnes.map((p) => [p.id, p.nom]), a.cosouscripteurId)}</select></label>
           </div>
@@ -1241,6 +1251,50 @@ function renderAv() {
 }
 
 // ---------- Onglet Barèmes ----------
+// ---------- Onglet Par banque / établissement ----------
+function renderBanques() {
+  const c = $("#tab-content");
+  const banques = {};
+  const add = (name, type, item, montant) => {
+    const key = (name || "").trim() || "(non précisé)";
+    (banques[key] ||= { av: [], actifs: [], total: 0 });
+    banques[key][type].push(item);
+    banques[key].total += montant;
+  };
+  (state.av || []).forEach((a) => add(a.etablissement, "av", a, Number(a.montant) || 0));
+  (state.actifs || []).forEach((a) => { if ((a.etablissement || "").trim()) add(a.etablissement, "actifs", a, Number(a.valeur) || 0); });
+
+  const entries = Object.entries(banques).sort((x, y) => y[1].total - x[1].total);
+  const totalGlobal = entries.reduce((s, [, v]) => s + v.total, 0) || 1;
+
+  c.innerHTML = `
+    <div class="card">
+      <h2>🏛️ Répartition par établissement</h2>
+      <p class="muted small">Vue consolidée par banque / assureur / courtier. Renseigne le champ « Banque » sur tes comptes titres & liquidités (onglet Patrimoine) et sur tes contrats (onglet Assurance-vie) pour tout retrouver ici.</p>
+      ${
+        entries.length
+          ? `<div class="kpi"><span>Total logé dans des établissements identifiés</span><b>${eur(totalGlobal)}</b></div>`
+          : `<p class="muted">Aucun établissement renseigné pour l'instant.</p>`
+      }
+    </div>
+    ${entries.map(([nom, v]) => {
+      const part = (v.total / totalGlobal) * 100;
+      const rows = [
+        ...v.av.map((a) => `<tr><td>🛡️ Assurance-vie</td><td>${a.libelle || a.id}</td><td class="muted small">${a.avant70 ? "avant 70 ans" : "après 70 ans"}</td><td style="text-align:right">${eur(a.montant)}</td></tr>`),
+        ...v.actifs.map((a) => `<tr><td>${CAT_LOOKUP[a.categorie] || a.categorie}</td><td>${a.libelle || a.id}</td><td class="muted small"></td><td style="text-align:right">${eur(a.valeur)}</td></tr>`),
+      ].join("");
+      return `<div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <h3 style="margin:0">🏛️ ${nom}</h3>
+          <b style="font-size:18px;color:var(--accent)">${eur(v.total)} <span class="muted small">· ${part.toFixed(0)} %</span></b>
+        </div>
+        <div class="gauge" style="margin:10px 0"><div class="gauge-fill" style="width:${part}%"></div></div>
+        <table class="grid"><thead><tr><th>Type</th><th>Contrat / compte</th><th></th><th style="text-align:right">Montant</th></tr></thead>
+          <tbody>${rows}</tbody></table>
+      </div>`;
+    }).join("")}`;
+}
+
 function renderBaremes() {
   const c = $("#tab-content");
   const tranches = (b) =>
