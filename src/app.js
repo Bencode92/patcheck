@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=22";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=22";
-import { buildMermaid, debrief } from "./graph.js?v=22";
-import * as sync from "./sync.js?v=22";
+} from "./data.js?v=23";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=23";
+import { buildMermaid, debrief } from "./graph.js?v=23";
+import * as sync from "./sync.js?v=23";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -226,6 +226,8 @@ function exporterResume() {
   push("");
   const expoCsv = {};
   Object.entries(d.parCategorie).forEach(([k, v]) => { const key = k === "sci" ? "immobilier (dont SCI)" : k; expoCsv[key] = (expoCsv[key] || 0) + v; });
+  const avTot = (d.avAvant70 || 0) + (d.avApres70 || 0);
+  if (avTot > 0) expoCsv["assurance-vie"] = (expoCsv["assurance-vie"] || 0) + avTot;
   const totalCat = Object.values(expoCsv).reduce((s, v) => s + v, 0) || 1;
   push("EXPOSITION PAR CATÉGORIE", "Valeur", "Part");
   Object.entries(expoCsv).sort((a, b) => b[1] - a[1]).forEach(([k, v]) => push(k, euro(v), (v / totalCat * 100).toFixed(0) + " %"));
@@ -400,14 +402,16 @@ async function renderOrganigramme() {
   const persoRows = state.personnes
     .map((p) => `<div class="line"><span>${p.nom} <small class="muted">(${p.role})</small></span><b>${eur(d.parPersonne[p.id] || 0)}</b></div>`)
     .join("");
-  // Exposition : les SCI sont regroupées avec l'immobilier (ce sont des biens immo)
+  // Exposition : SCI regroupées avec l'immobilier, assurance-vie ajoutée comme classe d'actif
   const hasSci = (d.parCategorie.sci || 0) > 0;
+  const avTotal = (d.avAvant70 || 0) + (d.avApres70 || 0);
   const expo = {};
   Object.entries(d.parCategorie).forEach(([k, v]) => {
     const key = k === "sci" ? "immobilier" : k;
     expo[key] = (expo[key] || 0) + v;
   });
-  const CAT_LBL = { immobilier: hasSci ? "🏠 Immobilier (dont SCI)" : "🏠 Immobilier", entreprise: "🏭 Entreprise", liquidites: "💶 Liquidités", titres: "📈 Titres", autre: "Autre" };
+  if (avTotal > 0) expo.assurancevie = (expo.assurancevie || 0) + avTotal;
+  const CAT_LBL = { immobilier: hasSci ? "🏠 Immobilier (dont SCI)" : "🏠 Immobilier", entreprise: "🏭 Entreprise", liquidites: "💶 Liquidités", titres: "📈 Titres", assurancevie: "🛡️ Assurance-vie", autre: "Autre" };
   const totalCat = Object.values(expo).reduce((s, v) => s + v, 0) || 1;
   const catRows = Object.entries(expo)
     .sort((a, b) => b[1] - a[1])
@@ -423,9 +427,9 @@ async function renderOrganigramme() {
   c.innerHTML = `
     <div class="card hero">
       <div>
-        <div class="muted small">Patrimoine net du foyer</div>
-        <div class="hero-total">${eur(d.patrimoineFoyer)}</div>
-        <div class="muted small">Régime : <b>${REGIME_LABEL[d.regime] || "non précisé"}</b> · Droits succession estimés : <b>${eur(d.droitsSuccessionEstimes)}</b></div>
+        <div class="muted small">Patrimoine global du foyer${avTotal > 0 ? " (avec assurance-vie)" : ""}</div>
+        <div class="hero-total">${eur(d.patrimoineFoyer + avTotal)}</div>
+        <div class="muted small">${avTotal > 0 ? `dont biens ${eur(d.patrimoineFoyer)} + assurance-vie ${eur(avTotal)} · ` : ""}Régime : <b>${REGIME_LABEL[d.regime] || "non précisé"}</b> · Droits succession estimés (hors AV) : <b>${eur(d.droitsSuccessionEstimes)}</b></div>
       </div>
       <button id="exp_resume" class="btn primary">⬇ Exporter le résumé (CSV)</button>
     </div>
