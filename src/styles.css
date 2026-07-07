@@ -466,6 +466,14 @@ input[type="checkbox"], input[type="radio"] {
 
 /* ---------- Groupes de catégories repliables ---------- */
 
+.verif-btn {
+  border: 1px solid var(--line-strong); background: var(--panel); color: var(--muted);
+  font-size: 12px; font-weight: 650; padding: 3px 10px; border-radius: 999px; cursor: pointer;
+  font-family: inherit; transition: all var(--tr); white-space: nowrap;
+}
+.verif-btn:hover { border-color: var(--accent-2); color: var(--accent-2); }
+.verif-btn.on { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
+
 .cat-group { margin-bottom: 14px; }
 .cat-header {
   display: flex; justify-content: space-between; align-items: center; width: 100%;

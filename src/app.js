@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=33";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=33";
-import { buildMermaid, debrief } from "./graph.js?v=33";
-import * as sync from "./sync.js?v=33";
+} from "./data.js?v=34";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=34";
+import { buildMermaid, debrief } from "./graph.js?v=34";
+import * as sync from "./sync.js?v=34";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -824,6 +824,7 @@ function renderPatrimoine() {
         ${CAT_A_BANQUE.has(a.categorie) ? `<input class="f_etab" data-ai="${ai}" list="etabs" placeholder="Banque / Courtier" value="${a.etablissement || ""}" style="max-width:160px">` : ""}
         <input class="f_an" data-ai="${ai}" type="number" min="1900" max="${yr}" placeholder="Année acquis." value="${a.annee ?? ""}" style="max-width:120px">
         ${a.categorie === "entreprise" ? `<label class="benef-chk"><input type="checkbox" class="f_dut" data-ai="${ai}" ${a.dutreil ? "checked" : ""}> Dutreil −75%</label>` : ""}
+        <button class="verif-btn ${a.verifie ? "on" : ""}" data-verif="${ai}" title="Marquer comme vérifié">${a.verifie ? "✓ OK" : "OK"}</button>
         <button class="danger-link" data-del="actif" data-ai="${ai}" title="Supprimer ce bien">🗑</button>
       </div>
       <div class="pv-line muted small" data-ai="${ai}" style="margin:-4px 0 8px">${pvText(a)}</div>
@@ -895,6 +896,8 @@ function renderPatrimoine() {
     }
     if (e.target.closest("#collapse_all")) { catsPresentes.forEach((k) => collapsedCats.add(k)); renderPatrimoine(); return; }
     if (e.target.closest("#expand_all")) { collapsedCats.clear(); renderPatrimoine(); return; }
+    const verif = e.target.closest("[data-verif]");
+    if (verif) { const a = A[+verif.dataset.verif]; a.verifie = !a.verifie; save(); renderPatrimoine(); return; }
 
     const add = e.target.closest("[data-add]");
     if (add) {
@@ -1209,6 +1212,7 @@ function renderAv() {
       <p class="muted small">Renseigne chaque contrat, son souscripteur, le capital, le régime (avant/après 70 ans) et coche les <b>bénéficiaires</b> (clause bénéficiaire).</p>
       ${AV.map((a, i) => `
         <div class="av-edit" data-i="${i}">
+          <div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button class="verif-btn av_verif ${a.verifie ? "on" : ""}" title="Marquer comme vérifié">${a.verifie ? "✓ OK" : "OK"}</button></div>
           <div class="form-row">
             <label>Libellé<input class="av_lib" value="${a.libelle || ""}" placeholder="ex : Contrat retraite"></label>
             <label>Banque / Assureur<input class="av_etab" list="etabs" value="${a.etablissement || ""}" placeholder="ex : Generali, AXA…"></label>
@@ -1262,6 +1266,7 @@ function renderAv() {
     $(".av_an", row).addEventListener("input", (e) => { AV[i].annee = e.target.value === "" ? null : Number(e.target.value); save(); });
     $(".av_av70", row).addEventListener("change", (e) => { AV[i].avant70 = e.target.value === "oui"; save(); });
     $(".av_clause", row).addEventListener("input", (e) => { AV[i].clause = e.target.value; save(); });
+    $(".av_verif", row).addEventListener("click", () => { AV[i].verifie = !AV[i].verifie; save(); renderAv(); });
     $(".av_del", row).addEventListener("click", () => { AV.splice(i, 1); save(); renderAv(); });
   });
   $$("#tab-content .av_ben").forEach((cb) => cb.addEventListener("change", (e) => {
@@ -1355,7 +1360,8 @@ function renderEntreprise() {
         <label class="benef-chk"><input type="checkbox" class="e_dut" data-ai="${ai}" ${a.dutreil ? "checked" : ""}> Pacte Dutreil (exonération 75 %)</label>
         ${a.dutreil ? `<label style="max-width:200px">Année engagement collectif<input class="e_dutan" data-ai="${ai}" type="number" min="1990" max="${new Date().getFullYear()}" value="${a.dutreilAnnee ?? ""}"></label>` : ""}
         <label style="max-width:220px">Année du démembrement<input class="e_demyr" data-ai="${ai}" type="number" min="1990" max="${new Date().getFullYear()}" placeholder="fige le barème 669" value="${a.demembrementAnnee ?? ""}"></label>
-        <button class="danger-link" data-del="entreprise" data-ai="${ai}" title="Supprimer" style="margin-left:auto">🗑</button>
+        <button class="verif-btn ${a.verifie ? "on" : ""}" data-verif="${ai}" title="Marquer comme vérifié" style="margin-left:auto">${a.verifie ? "✓ OK" : "OK"}</button>
+        <button class="danger-link" data-del="entreprise" data-ai="${ai}" title="Supprimer">🗑</button>
       </div>
 
       <div class="asset-sub">
@@ -1391,6 +1397,8 @@ function renderEntreprise() {
     <p class="muted small center">Ces sociétés apparaissent aussi dans le <b>🏦 Patrimoine</b> (catégorie Entreprise) et le <b>🏠 Résumé</b>.</p>`;
 
   c.onclick = (e) => {
+    const verif = e.target.closest("[data-verif]");
+    if (verif) { const a = A[+verif.dataset.verif]; a.verifie = !a.verifie; save(); renderEntreprise(); return; }
     const add = e.target.closest("[data-add]");
     if (add) {
       if (add.dataset.add === "entreprise") {
