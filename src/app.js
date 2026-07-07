@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=25";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=25";
-import { buildMermaid, debrief } from "./graph.js?v=25";
-import * as sync from "./sync.js?v=25";
+} from "./data.js?v=26";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=26";
+import { buildMermaid, debrief } from "./graph.js?v=26";
+import * as sync from "./sync.js?v=26";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -15,6 +15,13 @@ const eur = (n) =>
   (n ?? 0).toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
 const pct = (n) => (n * 100).toFixed(0) + " %";
 const parseNum = (v) => Number(String(v).replace(/[^\d.-]/g, "")) || 0;
+// Accepte "16.2", "16,2" ou une fraction "81/500" -> renvoie un % (16.2)
+const parsePart = (v) => {
+  const s = String(v).trim().replace(",", ".");
+  const m = s.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
+  if (m) { const a = parseFloat(m[1]), b = parseFloat(m[2]); return b ? +((a / b) * 100).toFixed(2) : 0; }
+  return parseNum(v);
+};
 
 function ageAu(naissance, dateRef = new Date()) {
   if (!naissance) return null;
@@ -405,23 +412,40 @@ async function renderOrganigramme() {
   const droitBadge = (dr) => dr === "PP" ? "" : `<span class="badge warn">${DROIT_LBL[dr] || dr}</span>`;
   const persoDetailCard = state.personnes.map((p) => {
     const items = (d.parPersonneDetail[p.id] || []).slice().sort((a, b) => b.valeur - a.valeur);
-    const avOwned = (state.av || []).filter((a) => a.souscripteurId === p.id || a.cosouscripteurId === p.id);
+    const bienTotal = d.parPersonne[p.id] || 0;
+    // Assurance-vie attribuée : souscripteur (ou 50/50 en co-adhésion)
+    const avItems = [];
+    (state.av || []).forEach((a) => {
+      const m = Number(a.montant) || 0;
+      if (a.cosouscripteurId && (a.souscripteurId === p.id || a.cosouscripteurId === p.id)) avItems.push({ lib: a.libelle || "AV", val: m / 2, co: true });
+      else if (!a.cosouscripteurId && a.souscripteurId === p.id) avItems.push({ lib: a.libelle || "AV", val: m, co: false });
+    });
+    const avPerso = avItems.reduce((s, i) => s + i.val, 0);
+    const grand = bienTotal + avPerso;
+    const bienRows = items.map((it) => `<tr>
+      <td>${CAT_LOOKUP[it.categorie] || it.categorie} · ${it.libelle}</td>
+      <td>${it.part} %</td>
+      <td>${it.droit === "PP" ? '<span class="muted small">pleine propriété</span>' : droitBadge(it.droit)}</td>
+      <td style="text-align:right"><b>${eur(it.valeur)}</b></td>
+    </tr>`).join("");
+    const avRows = avItems.map((it) => `<tr style="background:rgba(224,72,154,.06)">
+      <td>🛡️ ${it.lib}${it.co ? ' <span class="muted small">(co-adh. ½)</span>' : ""}</td>
+      <td colspan="2"><span class="muted small">assurance-vie · hors succession</span></td>
+      <td style="text-align:right"><b>${eur(it.val)}</b></td>
+    </tr>`).join("");
     return `<div class="asset-card">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
         <b style="font-size:15px">${p.nom} <span class="muted small">(${p.role})</span></b>
-        <b style="color:var(--accent);font-size:16px">${eur(d.parPersonne[p.id] || 0)}</b>
+        <b style="color:var(--accent);font-size:16px">${eur(grand)}</b>
       </div>
-      ${items.length
-        ? `<table class="grid"><thead><tr><th>Bien détenu</th><th>Part</th><th>Droit</th><th style="text-align:right">Valeur détenue</th></tr></thead><tbody>
-          ${items.map((it) => `<tr>
-            <td>${CAT_LOOKUP[it.categorie] || it.categorie} · ${it.libelle}</td>
-            <td>${it.part} %</td>
-            <td>${it.droit === "PP" ? '<span class="muted small">pleine propriété</span>' : droitBadge(it.droit)}</td>
-            <td style="text-align:right"><b>${eur(it.valeur)}</b></td>
-          </tr>`).join("")}
-          </tbody></table>`
-        : `<div class="muted small" style="margin-top:6px">Aucun bien détenu directement.</div>`}
-      ${avOwned.length ? `<div class="muted small" style="margin-top:8px">🛡️ Assurance-vie souscrite : ${avOwned.map((a) => `${a.libelle || "contrat"} (${eur(a.montant)}${a.cosouscripteurId ? ", co-adhésion" : ""})`).join(" · ")}</div>` : ""}
+      ${(items.length || avItems.length)
+        ? `<table class="grid"><thead><tr><th>Détenu</th><th>Part</th><th>Droit</th><th style="text-align:right">Valeur</th></tr></thead><tbody>
+          ${bienRows}${avRows}
+          </tbody>
+          <tfoot>
+            ${avItems.length ? `<tr><td colspan="3" class="muted small">dont biens ${eur(bienTotal)} + assurance-vie ${eur(avPerso)}</td><td></td></tr>` : ""}
+          </tfoot></table>`
+        : `<div class="muted small" style="margin-top:6px">Rien de détenu pour l'instant.</div>`}
     </div>`;
   }).join("");
   // Exposition : SCI regroupées avec l'immobilier, assurance-vie ajoutée comme classe d'actif
@@ -798,7 +822,7 @@ function renderPatrimoine() {
         ${detenteursDe(a.id).map(({ d, i }) => `
           <div class="mini-row">
             <select class="dd_prop" data-di="${i}">${opt(ownerList(), d.proprietaire)}</select>
-            <input class="dd_part" data-di="${i}" inputmode="numeric" value="${d.part ?? ""}" placeholder="%" style="max-width:70px"><span class="muted">%</span>
+            <input class="dd_part" data-di="${i}" value="${d.part ?? ""}" placeholder="% ou 81/500" style="max-width:110px"><span class="muted">%</span>
             <select class="dd_droit" data-di="${i}">${opt(droits, d.droit)}</select>
             <button class="danger-link" data-del="detention" data-di="${i}">✕</button>
           </div>`).join("") || `<div class="muted small">Aucun détenteur pour l'instant.</div>`}
@@ -913,7 +937,7 @@ function renderPatrimoine() {
       }
       save();
     } else if (t.dataset.di != null && t.classList.contains("dd_part")) {
-      D[+t.dataset.di].part = parseNum(t.value); save();
+      D[+t.dataset.di].part = parsePart(t.value); save();
     } else if (t.dataset.xi != null) {
       const x = X[+t.dataset.xi];
       if (t.classList.contains("xx_lib")) x.libelle = t.value;
@@ -1322,7 +1346,7 @@ function renderEntreprise() {
         ${dets.map(({ d, i }) => `
           <div class="mini-row">
             <select class="ed_prop" data-di="${i}">${opt(ownerList(), d.proprietaire)}</select>
-            <input class="ed_part" data-di="${i}" inputmode="numeric" value="${d.part ?? ""}" placeholder="%" style="max-width:70px"><span class="muted">%</span>
+            <input class="ed_part" data-di="${i}" value="${d.part ?? ""}" placeholder="% ou 81/500" style="max-width:110px"><span class="muted">%</span>
             <select class="ed_droit" data-di="${i}">${opt(droits, d.droit)}</select>
             <button class="danger-link" data-del="entdet" data-di="${i}">✕</button>
           </div>`).join("") || `<div class="muted small">Aucun détenteur.</div>`}
@@ -1386,7 +1410,7 @@ function renderEntreprise() {
       else return;
       save();
     } else if (t.dataset.di != null && t.classList.contains("ed_part")) {
-      D[+t.dataset.di].part = parseNum(t.value); save();
+      D[+t.dataset.di].part = parsePart(t.value); save();
     }
   };
 

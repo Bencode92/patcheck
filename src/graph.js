@@ -1,7 +1,17 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE } from "./data.js?v=25";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=26";
+
+// Âge d'une personne (année de naissance / âge saisi / date)
+function ageDePers(p) {
+  if (!p) return null;
+  const y = new Date().getFullYear();
+  if (p.annee) return y - Number(p.annee);
+  if (p.age != null && p.age !== "") return Number(p.age);
+  if (p.naissance) { const n = new Date(p.naissance); return Number.isFinite(n.getFullYear()) ? y - n.getFullYear() : null; }
+  return null;
+}
 
 // Taux d'exonération Dutreil (art. 787 B) sur les titres de société éligibles
 const DUTREIL_EXO = 0.75;
@@ -113,6 +123,27 @@ export function debrief(state) {
     return a ? Math.max(0, a.valeur - (detteParActif[id] || 0)) : 0;
   };
 
+  // Âge de l'usufruitier par actif (pour valoriser US / NP au barème 669)
+  const usuAgeParActif = {};
+  detentions.forEach((d) => {
+    if (d.droit === "US") {
+      const age = ageDePers(personnes.find((p) => p.id === d.proprietaire));
+      if (age != null) usuAgeParActif[d.actifRef] = age;
+    }
+  });
+  const agesParents = parents.map(ageDePers).filter((a) => a != null);
+  const oldestParent = agesParents.length ? Math.max(...agesParents) : 65;
+  const usuAge = (actifId) => usuAgeParActif[actifId] ?? oldestParent;
+
+  // Valeur ÉCONOMIQUE d'une détention : PP = pleine ; US = %usufruit ; NP = %nue-propriété
+  // (US + NP sur les mêmes parts = la valeur pleine, pas de double compte).
+  const valeurEconomique = (d) => {
+    const brut = (actifNet(d.actifRef) * (Number(d.part) || 0)) / 100;
+    if (d.droit === "US") return brut * tauxUsufruit(usuAge(d.actifRef));
+    if (d.droit === "NP") return brut * (1 - tauxUsufruit(usuAge(d.actifRef)));
+    return brut;
+  };
+
   // Patrimoine NET détenu par les personnes (biens logés en SCI non recomptés :
   // les personnes détiennent les parts de SCI ; dette de la SCI déjà déduite).
   const parPersonne = {};
@@ -123,7 +154,7 @@ export function debrief(state) {
     if (!estPersonne(d.proprietaire)) return; // détenu par une SCI -> ignoré au niveau foyer
     const a = actif(d.actifRef);
     if (!a) return;
-    const val = (actifNet(d.actifRef) * d.part) / 100;
+    const val = valeurEconomique(d); // US/NP valorisés au barème 669
     parPersonne[d.proprietaire] += val;
     patrimoineFoyer += val;
     parPersonneDetail[d.proprietaire].push({ libelle: a.libelle || a.id, categorie: a.categorie, part: d.part, droit: d.droit, valeur: val });
@@ -140,7 +171,7 @@ export function debrief(state) {
     if (!estPersonne(d.proprietaire)) return;
     const a = actif(d.actifRef);
     if (!a) return;
-    parCategorie[a.categorie] = (parCategorie[a.categorie] || 0) + (actifNet(d.actifRef) * d.part) / 100;
+    parCategorie[a.categorie] = (parCategorie[a.categorie] || 0) + valeurEconomique(d);
   });
 
   // Donations : total, rapportables (<15 ans), purgées
