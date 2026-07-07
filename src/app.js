@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=23";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=23";
-import { buildMermaid, debrief } from "./graph.js?v=23";
-import * as sync from "./sync.js?v=23";
+} from "./data.js?v=24";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=24";
+import { buildMermaid, debrief } from "./graph.js?v=24";
+import * as sync from "./sync.js?v=24";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -158,6 +158,7 @@ const TABS = [
   { id: "organigramme", label: "🏠 Résumé patrimonial" },
   { id: "famille", label: "👪 Famille" },
   { id: "patrimoine", label: "🏦 Patrimoine" },
+  { id: "entreprise", label: "🏭 Entreprise" },
   { id: "assurancevie", label: "🛡️ Assurance-vie" },
   { id: "banques", label: "🏛️ Par banque" },
   { id: "donations", label: "🎁 Donations réalisées" },
@@ -189,6 +190,7 @@ function render() {
     organigramme: renderOrganigramme,
     famille: renderFamille,
     patrimoine: renderPatrimoine,
+    entreprise: renderEntreprise,
     donations: renderDonations,
     abattements: renderAbattements,
     simulateur: renderSimulateur,
@@ -1264,6 +1266,127 @@ function renderAv() {
 }
 
 // ---------- Onglet Barèmes ----------
+// ---------- Onglet Entreprise (Dutreil + démembrement des titres) ----------
+const FORMES = [["", "— forme —"], ["sarl", "SARL"], ["sas", "SAS"], ["sa", "SA"], ["sci", "SCI (à l'IS)"], ["holding", "Holding"], ["ei", "Entreprise individuelle"], ["autre", "Autre"]];
+
+function renderEntreprise() {
+  const c = $("#tab-content");
+  const A = state.actifs || [], D = state.detentions || [];
+  const ents = A.map((a, ai) => ({ a, ai })).filter((o) => o.a.categorie === "entreprise");
+  const droits = [["PP", "Pleine propriété"], ["US", "Usufruit"], ["NP", "Nue-propriété"]];
+  const detOf = (aid) => D.map((d, i) => ({ d, i })).filter((o) => o.d.actifRef === aid);
+
+  const card = ({ a, ai }) => {
+    const dets = detOf(a.id);
+    const valeur = Number(a.valeur) || 0;
+    const usDet = dets.find((o) => o.d.droit === "US");
+    const usPers = usDet ? personne(usDet.d.proprietaire) : null;
+    const age = usPers ? ageDe(usPers) : null;
+    const tUS = age != null ? tauxUsufruit(age) : null;
+    const npVal = tUS != null ? valeur * (1 - tUS) : null;
+    const sommeParts = dets.reduce((s, o) => s + (Number(o.d.part) || 0), 0);
+    return `<div class="asset-card">
+      <div class="form-row">
+        <label>Nom de la société<input class="e_lib" data-ai="${ai}" value="${a.libelle || ""}" placeholder="ex : Ma Holding SAS"></label>
+        <label>Forme juridique<select class="e_forme" data-ai="${ai}">${opt(FORMES, a.forme || "")}</select></label>
+        <label>Valeur des titres (€)<input class="e_val" data-ai="${ai}" inputmode="numeric" value="${a.valeur || ""}"></label>
+        <label>Année acquis./création<input class="e_an" data-ai="${ai}" type="number" min="1900" max="${new Date().getFullYear()}" value="${a.annee ?? ""}"></label>
+      </div>
+      <div class="benef-row">
+        <label class="benef-chk"><input type="checkbox" class="e_dut" data-ai="${ai}" ${a.dutreil ? "checked" : ""}> Pacte Dutreil (exonération 75 %)</label>
+        ${a.dutreil ? `<label style="max-width:220px">Année engagement collectif<input class="e_dutan" data-ai="${ai}" type="number" min="1990" max="${new Date().getFullYear()}" value="${a.dutreilAnnee ?? ""}"></label>` : ""}
+        <button class="danger-link" data-del="entreprise" data-ai="${ai}" title="Supprimer" style="margin-left:auto">🗑</button>
+      </div>
+
+      <div class="asset-sub">
+        <div class="sub-title">🔗 Détention des titres <span class="muted small">— associés, avec démembrement usufruit / nue-propriété</span></div>
+        ${dets.map(({ d, i }) => `
+          <div class="mini-row">
+            <select class="ed_prop" data-di="${i}">${opt(ownerList(), d.proprietaire)}</select>
+            <input class="ed_part" data-di="${i}" inputmode="numeric" value="${d.part ?? ""}" placeholder="%" style="max-width:70px"><span class="muted">%</span>
+            <select class="ed_droit" data-di="${i}">${opt(droits, d.droit)}</select>
+            <button class="danger-link" data-del="entdet" data-di="${i}">✕</button>
+          </div>`).join("") || `<div class="muted small">Aucun détenteur.</div>`}
+        <button class="btn small" data-add="entdet" data-ai="${ai}">+ associé / détenteur</button>
+        ${sommeParts && sommeParts !== 100 ? `<div class="muted small" style="color:var(--warn);margin-top:6px">⚠️ Les parts totalisent ${sommeParts} % (attendu 100 %).</div>` : ""}
+      </div>
+
+      <div class="result">
+        <div class="line"><span>Valeur des titres</span><b>${eur(valeur)}</b></div>
+        ${a.dutreil ? `<div class="line"><span>Exonération Dutreil (−75 %, art. 787 B)</span><b style="color:var(--accent-2)">− ${eur(valeur * 0.75)}</b></div>
+        <div class="line total"><span>Assiette taxable en transmission</span><b>${eur(valeur * 0.25)}</b></div>` : `<div class="line"><span class="muted small">Sans pacte Dutreil : assiette taxable = valeur pleine.</span></div>`}
+        ${tUS != null ? `<div class="line"><span>Démembrement — usufruitier ${usPers.nom} (${age} ans) → usufruit ${pct(tUS)} / NP ${pct(1 - tUS)}</span><b>NP transmise : ${eur(npVal)}</b></div>` : ""}
+      </div>
+    </div>`;
+  };
+
+  c.innerHTML = `
+    <div class="card">
+      <h2>🏭 Entreprise — titres, Dutreil & démembrement</h2>
+      <p class="muted small">Espace dédié aux sociétés (parts / actions). Gère la <b>forme juridique</b>, le <b>pacte Dutreil</b> (−75 % d'assiette) et le <b>démembrement des titres</b> (usufruit conservé par le dirigeant, nue-propriété donnée aux enfants — valorisée selon le barème 669 CGI d'après l'âge de l'usufruitier).</p>
+      ${ents.map(card).join("") || `<p class="muted">Aucune entreprise. Ajoute-en une ci-dessous.</p>`}
+      <button class="btn primary" data-add="entreprise">+ Ajouter une entreprise</button>
+    </div>
+    <p class="muted small center">Ces sociétés apparaissent aussi dans le <b>🏦 Patrimoine</b> (catégorie Entreprise) et le <b>🏠 Résumé</b>.</p>`;
+
+  c.onclick = (e) => {
+    const add = e.target.closest("[data-add]");
+    if (add) {
+      if (add.dataset.add === "entreprise") {
+        A.push({ id: uid(), libelle: "", categorie: "entreprise", forme: "", valeur: 0, annee: null, dutreil: true });
+        state.actifs = A;
+      } else if (add.dataset.add === "entdet") {
+        const ent = A[+add.dataset.ai];
+        D.push({ proprietaire: state.personnes[0]?.id || "", actifRef: ent.id, part: 0, droit: "PP" });
+        state.detentions = D;
+      }
+      save(); renderEntreprise(); return;
+    }
+    const del = e.target.closest("[data-del]");
+    if (del) {
+      if (del.dataset.del === "entreprise") {
+        const removed = A[+del.dataset.ai];
+        A.splice(+del.dataset.ai, 1);
+        state.actifs = A;
+        state.detentions = D.filter((d) => d.actifRef !== removed.id);
+      } else if (del.dataset.del === "entdet") {
+        D.splice(+del.dataset.di, 1);
+      }
+      save(); renderEntreprise(); return;
+    }
+  };
+
+  c.oninput = (e) => {
+    const t = e.target;
+    if (t.dataset.ai != null) {
+      const a = A[+t.dataset.ai];
+      if (t.classList.contains("e_lib")) a.libelle = t.value;
+      else if (t.classList.contains("e_val")) { a.valeur = parseNum(t.value); save(); renderEntreprise(); return; }
+      else if (t.classList.contains("e_an")) a.annee = t.value === "" ? null : Number(t.value);
+      else if (t.classList.contains("e_dutan")) a.dutreilAnnee = t.value === "" ? null : Number(t.value);
+      else return;
+      save();
+    } else if (t.dataset.di != null && t.classList.contains("ed_part")) {
+      D[+t.dataset.di].part = parseNum(t.value); save();
+    }
+  };
+
+  c.onchange = (e) => {
+    const t = e.target;
+    if (t.dataset.ai != null) {
+      const a = A[+t.dataset.ai];
+      if (t.classList.contains("e_forme")) { a.forme = t.value; save(); }
+      else if (t.classList.contains("e_dut")) { a.dutreil = t.checked; save(); renderEntreprise(); }
+    } else if (t.dataset.di != null) {
+      const d = D[+t.dataset.di];
+      if (t.classList.contains("ed_prop")) d.proprietaire = t.value;
+      else if (t.classList.contains("ed_droit")) d.droit = t.value;
+      else return;
+      save(); renderEntreprise();
+    }
+  };
+}
+
 // ---------- Onglet Par banque / établissement ----------
 function renderBanques() {
   const c = $("#tab-content");
