@@ -1,13 +1,13 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=30";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=31";
 
-// Année de naissance d'une personne (année / date / déduite de l'âge)
+// Année de naissance : la DATE complète prime (plus précise), puis année seule, puis âge
 function birthYear(p) {
   if (!p) return null;
+  if (p.naissance) { const n = new Date(p.naissance); if (Number.isFinite(n.getFullYear())) return n.getFullYear(); }
   if (p.annee) return Number(p.annee);
-  if (p.naissance) { const n = new Date(p.naissance); return Number.isFinite(n.getFullYear()) ? n.getFullYear() : null; }
   if (p.age != null && p.age !== "") return new Date().getFullYear() - Number(p.age);
   return null;
 }

@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=30";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=30";
-import { buildMermaid, debrief } from "./graph.js?v=30";
-import * as sync from "./sync.js?v=30";
+} from "./data.js?v=31";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=31";
+import { buildMermaid, debrief } from "./graph.js?v=31";
+import * as sync from "./sync.js?v=31";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -31,11 +31,11 @@ function ageAu(naissance, dateRef = new Date()) {
   if (m < 0 || (m === 0 && dateRef.getDate() < n.getDate())) age--;
   return age;
 }
-// Année de naissance (année / date / déduite de l'âge) — pour figer le barème 669
+// Année de naissance : la DATE complète prime (plus précise), puis année seule, puis âge
 function birthYearOf(p) {
   if (!p) return null;
+  if (p.naissance) { const y = new Date(p.naissance).getFullYear(); if (Number.isFinite(y)) return y; }
   if (p.annee) return Number(p.annee);
-  if (p.naissance) { const y = new Date(p.naissance).getFullYear(); return Number.isFinite(y) ? y : null; }
   if (p.age != null && p.age !== "") return new Date().getFullYear() - Number(p.age);
   return null;
 }
