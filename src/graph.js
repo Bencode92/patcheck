@@ -1,7 +1,7 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=39";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=40";
 
 // Année de naissance : la DATE complète prime (plus précise), puis année seule, puis âge
 function birthYear(p) {
@@ -281,12 +281,16 @@ export function debrief(state) {
   // Base successorale GLOBALE = assiette taxable des biens + AV après 70 ans réintégrée.
   // Droits recalculés sur cette base (l'AV après 70 ans est taxée au barème succession).
   const baseSuccessoraleGlobale = patrimoineTaxable + apres70Reintegre;
+  // Nombre d'abattements enfant applicables : en attribution intégrale, tout revient
+  // au conjoint au 1er décès → les enfants n'héritent qu'au 2d décès avec 1 SEUL
+  // abattement (celui du 1er parent est perdu). Sinon 1 par parent.
+  const nbAbatEnfant = (state.regime === "universelle_attribution") ? 1 : Math.max(1, parents.length);
   let droitsSuccessionGlobaux = 0;
   if (enfants.length) {
     const partGlob = baseSuccessoraleGlobale / enfants.length;
     enfants.forEach((enf) => {
       const consomme = donations.filter((d) => d.beneficiaireId === enf.id && anneesEcoulees(d.date) < DELAI_RAPPEL_ANS).reduce((s, d) => s + d.montant, 0);
-      const ab = Math.max(0, ABATTEMENTS.enfant * parents.length - consomme);
+      const ab = Math.max(0, ABATTEMENTS.enfant * nbAbatEnfant - consomme);
       droitsSuccessionGlobaux += calculDroits(Math.max(0, partGlob - ab), BAREME_LIGNE_DIRECTE);
     });
   }

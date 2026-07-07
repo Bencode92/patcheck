@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=39";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=39";
-import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=39";
-import * as sync from "./sync.js?v=39";
-import { askAI } from "./ai.js?v=39";
+} from "./data.js?v=40";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=40";
+import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=40";
+import * as sync from "./sync.js?v=40";
+import { askAI } from "./ai.js?v=40";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -502,7 +502,7 @@ async function renderOrganigramme() {
     diptyque = `<div class="card">
       <div class="section-head"><div><h2>⚰️ Si décès demain — les deux ordres possibles</h2><div class="small muted">Chaque volet déroule la chronologie : 1ᵉʳ décès (conjoint) puis 2ᵈ décès (enfants).</div></div></div>
       <div class="deces-grid">${parents.map(simCol).join("")}</div>
-      ${sim0 && sim0.hypothese ? `<p class="small muted" style="margin-top:10px">ℹ️ Hypothèse de calcul : ${sim0.hypothese}</p>` : ""}
+      ${sim0 && sim0.hypothese ? `<p class="small muted" style="margin-top:10px">ℹ️ Hypothèse de calcul : ${sim0.hypothese} Le détail par ordre peut différer de quelques % du total en tête (modèle « masse unique » vs deux successions successives).</p>` : ""}
       ${rows.length ? `<h3 style="margin-top:16px">Droits par enfant au 2ᵈ décès${parents.length > 1 ? ` (ordre : décès de ${parents[0].nom} d'abord)` : ""}</h3>
       <div class="table-wrap"><table class="grid2">
         <thead><tr><th>Enfant</th><th>Part reçue</th><th>Abattement</th><th>Base taxable</th><th>Droits</th><th>Net perçu</th><th>Taux</th></tr></thead>
