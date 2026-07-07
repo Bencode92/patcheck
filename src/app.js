@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=15";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=15";
-import { buildMermaid, debrief } from "./graph.js?v=15";
-import * as sync from "./sync.js?v=15";
+} from "./data.js?v=16";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=16";
+import { buildMermaid, debrief } from "./graph.js?v=16";
+import * as sync from "./sync.js?v=16";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -730,16 +730,23 @@ function renderPatrimoine() {
   const detenteursDe = (aid) => D.map((d, i) => ({ d, i })).filter((o) => o.d.actifRef === aid);
   const dettesDe = (aid) => X.map((x, i) => ({ x, i })).filter((o) => o.x.cible === aid);
 
+  const pvText = (a) =>
+    a.categorie === "immobilier" && a.prixAcq && a.valeur
+      ? `Plus-value latente : <b>${eur(a.valeur - a.prixAcq)}</b> (achat ${eur(a.prixAcq)} → marché ${eur(a.valeur)})`
+      : "";
+
   const assetCard = (a, ai) => `
     <div class="asset-card">
       <div class="asset-head">
         <select class="f_cat" data-ai="${ai}">${opt(CATEGORIES, a.categorie)}</select>
         <input class="f_lib" data-ai="${ai}" placeholder="Libellé (ex : Résidence principale)" value="${a.libelle || ""}">
-        <input class="f_val" data-ai="${ai}" inputmode="numeric" placeholder="Valeur €" value="${a.valeur || ""}" style="max-width:130px">
+        <input class="f_val" data-ai="${ai}" inputmode="numeric" placeholder="${a.categorie === "immobilier" ? "Valeur marchande €" : "Valeur €"}" value="${a.valeur || ""}" style="max-width:150px">
+        ${a.categorie === "immobilier" ? `<input class="f_pxacq" data-ai="${ai}" inputmode="numeric" placeholder="Prix d'achat €" value="${a.prixAcq ?? ""}" style="max-width:130px">` : ""}
         <input class="f_an" data-ai="${ai}" type="number" min="1900" max="${yr}" placeholder="Année acquis." value="${a.annee ?? ""}" style="max-width:120px">
         ${a.categorie === "entreprise" ? `<label class="benef-chk"><input type="checkbox" class="f_dut" data-ai="${ai}" ${a.dutreil ? "checked" : ""}> Dutreil −75%</label>` : ""}
         <button class="danger-link" data-del="actif" data-ai="${ai}" title="Supprimer ce bien">🗑</button>
       </div>
+      <div class="pv-line muted small" data-ai="${ai}" style="margin:-4px 0 8px">${pvText(a)}</div>
 
       <div class="asset-sub">
         <div class="sub-title">🔗 Détenteurs <span class="muted small">— qui possède, quelle part, quel droit (démembrement)</span></div>
@@ -814,11 +821,17 @@ function renderPatrimoine() {
   c.oninput = (e) => {
     const t = e.target;
     if (t.dataset.ai != null) {
-      const a = A[+t.dataset.ai];
+      const ai = +t.dataset.ai, a = A[ai];
       if (t.classList.contains("f_lib")) a.libelle = t.value;
       else if (t.classList.contains("f_val")) a.valeur = parseNum(t.value);
+      else if (t.classList.contains("f_pxacq")) a.prixAcq = t.value === "" ? null : parseNum(t.value);
       else if (t.classList.contains("f_an")) a.annee = t.value === "" ? null : Number(t.value);
       else return;
+      // met à jour la plus-value affichée sans re-render (garde le focus)
+      if (t.classList.contains("f_val") || t.classList.contains("f_pxacq")) {
+        const pv = c.querySelector(`.pv-line[data-ai="${ai}"]`);
+        if (pv) pv.innerHTML = pvText(a);
+      }
       save();
     } else if (t.dataset.di != null && t.classList.contains("dd_part")) {
       D[+t.dataset.di].part = parseNum(t.value); save();
