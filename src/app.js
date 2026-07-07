@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=21";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=21";
-import { buildMermaid, debrief } from "./graph.js?v=21";
-import * as sync from "./sync.js?v=21";
+} from "./data.js?v=22";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=22";
+import { buildMermaid, debrief } from "./graph.js?v=22";
+import * as sync from "./sync.js?v=22";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -712,7 +712,7 @@ const actifList = () => (state.actifs || []).map((a) => [a.id, (a.libelle || a.i
 const CAT_LOOKUP = Object.fromEntries(CATEGORIES);
 const collapsedCats = new Set(); // catégories repliées (état d'affichage, non sauvegardé)
 
-const ETABLISSEMENTS = ["Generali", "Société Générale", "BNP Paribas", "Aviva", "Trading 212", "AXA", "Natixis"];
+const ETABLISSEMENTS = ["Generali", "Société Générale", "BNP Paribas", "Aviva", "Trading 212", "AXA", "Natixis", "Coinbase", "Allianz"];
 const datalistEtabs = () => `<datalist id="etabs">${ETABLISSEMENTS.map((e) => `<option value="${e}">`).join("")}</datalist>`;
 const CAT_A_BANQUE = new Set(["titres", "liquidites"]); // catégories où une banque/courtier a du sens
 
