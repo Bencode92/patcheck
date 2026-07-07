@@ -1,7 +1,7 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=41";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=42";
 
 // Année de naissance : la DATE complète prime (plus précise), puis année seule, puis âge
 function birthYear(p) {
@@ -16,6 +16,17 @@ function ageDePers(p, anneeRef) {
   const by = birthYear(p);
   if (by == null) return null;
   return (anneeRef || new Date().getFullYear()) - by;
+}
+
+// Régime fiscal effectif d'un contrat au dénouement :
+//  - AV classique : selon le flag saisi (primes versées avant/après 70 ans).
+//  - PER assurantiel (a.per) : selon l'âge du SOUSCRIPTEUR au décès (< 70 → 990 I,
+//    ≥ 70 → 757 B). On utilise l'âge courant comme proxy du « décès aujourd'hui/demain ».
+function avAvant70Effectif(a, personnes) {
+  if (!a || !a.per) return !!(a && a.avant70);
+  const sousc = personnes.find((p) => p.id === a.souscripteurId);
+  const age = ageDePers(sousc);
+  return age != null ? age < 70 : true;
 }
 
 // Taux d'exonération Dutreil (art. 787 B) sur les titres de société éligibles
@@ -207,9 +218,9 @@ export function debrief(state) {
     });
   });
 
-  // Assurance-vie
+  // Assurance-vie (+ PER assurantiels). Régime effectif via avAvant70Effectif().
   let avAvant70 = 0, avApres70 = 0;
-  av.forEach((a) => (a.avant70 ? (avAvant70 += a.montant) : (avApres70 += a.montant)));
+  av.forEach((a) => (avAvant70Effectif(a, personnes) ? (avAvant70 += a.montant) : (avApres70 += a.montant)));
 
   // AV : capital réparti par bénéficiaire (selon répartition %, sinon parts égales)
   const avBenef = {};
@@ -217,12 +228,13 @@ export function debrief(state) {
     const m = Number(a.montant) || 0;
     const bens = a.beneficiaires || [];
     if (!bens.length || m <= 0) return;
+    const av70 = avAvant70Effectif(a, personnes);
     const rep = a.repartition || {};
     const totalRep = bens.reduce((s, b) => s + (Number(rep[b]) || 0), 0);
     bens.forEach((b) => {
       const share = totalRep > 0 ? (Number(rep[b]) || 0) / totalRep : 1 / bens.length;
       (avBenef[b] ||= { avant70: 0, apres70: 0 });
-      if (a.avant70) avBenef[b].avant70 += m * share;
+      if (av70) avBenef[b].avant70 += m * share;
       else avBenef[b].apres70 += m * share;
     });
   });
@@ -450,7 +462,7 @@ export function simulerDeces(state, defuntId) {
   // Taxation 990 I (primes avant 70 ans) par bénéficiaire, sur un jeu de contrats
   const taxeAV990 = (contrats) => {
     const benef = {};
-    contrats.filter((a) => a.avant70).forEach((a) => {
+    contrats.filter((a) => avAvant70Effectif(a, personnes)).forEach((a) => {
       const m = Number(a.montant) || 0; const bens = a.beneficiaires || []; if (!bens.length || m <= 0) return;
       const rep = a.repartition || {}; const tot = bens.reduce((s, b) => s + (Number(rep[b]) || 0), 0);
       bens.forEach((b) => { const sh = tot > 0 ? (Number(rep[b]) || 0) / tot : 1 / bens.length; benef[b] = (benef[b] || 0) + m * sh; });
@@ -463,7 +475,7 @@ export function simulerDeces(state, defuntId) {
     }).filter((x) => x.capital > 0);
   };
   // Primes après 70 ans réintégrées (au-delà de l'abattement global 30 500 €)
-  const reintegreApres70 = (contrats) => Math.max(0, contrats.filter((a) => !a.avant70).reduce((t, a) => t + (Number(a.montant) || 0), 0) - AV_APRES_70.abattementGlobal);
+  const reintegreApres70 = (contrats) => Math.max(0, contrats.filter((a) => !avAvant70Effectif(a, personnes)).reduce((t, a) => t + (Number(a.montant) || 0), 0) - AV_APRES_70.abattementGlobal);
 
   // Contrats dénoués : au 1er décès ceux du défunt (hors co-adhésion) ; au 2d ceux du conjoint + toute co-adhésion
   const contrats1 = av.filter((a) => a.souscripteurId === defuntId && !a.cosouscripteurId);
@@ -474,7 +486,7 @@ export function simulerDeces(state, defuntId) {
   const enf1 = partEnfants(masseBiens1 + reint1, defuntId);
   const av1 = taxeAV990(contrats1);
   const droitsAV1 = av1.reduce((s, x) => s + x.droits, 0);
-  const avDenouees1 = contrats1.filter((a) => a.avant70).map((a) => ({ contrat: a.libelle || a.id, beneficiaires: taxeAV990([a]) }));
+  const avDenouees1 = contrats1.filter((a) => avAvant70Effectif(a, personnes)).map((a) => ({ contrat: a.libelle || a.id, beneficiaires: taxeAV990([a]) }));
   const totalDroitsPremier = enf1.total + droitsAV1;
   const abattementsPerdus = attribution ? ABATTEMENTS.enfant * enfants.length : 0;
 

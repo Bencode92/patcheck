@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=41";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=41";
-import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=41";
-import * as sync from "./sync.js?v=41";
-import { askAI } from "./ai.js?v=41";
+} from "./data.js?v=42";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=42";
+import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=42";
+import * as sync from "./sync.js?v=42";
+import { askAI } from "./ai.js?v=42";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1195,7 +1195,7 @@ function renderAv() {
       <p class="muted small">Renseigne chaque contrat, son souscripteur, le capital, le régime (avant/après 70 ans) et coche les <b>bénéficiaires</b> (clause bénéficiaire).</p>
       ${AV.map((a, i) => `
         <div class="av-edit" data-i="${i}">
-          <div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button class="verif-btn av_verif ${a.verifie ? "on" : ""}" title="Marquer comme vérifié">${a.verifie ? "✓ OK" : "OK"}</button></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">${a.per ? '<span class="badge warn">🏦 PER — régime selon l\'âge au décès</span>' : "<span></span>"}<button class="verif-btn av_verif ${a.verifie ? "on" : ""}" title="Marquer comme vérifié">${a.verifie ? "✓ OK" : "OK"}</button></div>
           <div class="form-row">
             <label>Libellé<input class="av_lib" value="${a.libelle || ""}" placeholder="ex : Contrat retraite"></label>
             <label>Banque / Assureur<input class="av_etab" list="etabs" value="${a.etablissement || ""}" placeholder="ex : Generali, AXA…"></label>
@@ -1205,8 +1205,9 @@ function renderAv() {
           <div class="form-row">
             <label>Capital (€)<input class="av_mnt" value="${a.montant || ""}" inputmode="numeric"></label>
             <label>Année d'ouverture<input class="av_an" type="number" min="1950" max="${new Date().getFullYear()}" placeholder="ex : 2008" value="${a.annee ?? ""}"></label>
-            <label>Régime des primes<select class="av_av70">${opt([["oui", "Avant 70 ans"], ["non", "Après 70 ans"]], a.avant70 ? "oui" : "non")}</select></label>
+            <label>Régime des primes<select class="av_av70" ${a.per ? "disabled title='Déterminé automatiquement par l\\'âge au décès pour un PER'" : ""}>${opt([["oui", "Avant 70 ans"], ["non", "Après 70 ans"]], a.avant70 ? "oui" : "non")}</select></label>
           </div>
+          <label class="benef-chk" style="margin-top:2px"><input type="checkbox" class="av_per" ${a.per ? "checked" : ""}> 🏦 <b>PER assurantiel</b> <span class="muted small">— régime déterminé par l'âge du souscripteur au décès (&lt; 70 → 990 I ; ≥ 70 → 757 B, primes + gains). Saisis la valeur TOTALE du contrat.</span></label>
           <div class="benef-row"><span class="muted small">Bénéficiaires :</span> ${benefBoxes(a, i)}
             <button class="av_equal btn small" data-i="${i}">répartir également</button>
           </div>
@@ -1248,6 +1249,7 @@ function renderAv() {
     $(".av_mnt", row).addEventListener("input", (e) => { AV[i].montant = parseNum(e.target.value); save(); });
     $(".av_an", row).addEventListener("input", (e) => { AV[i].annee = e.target.value === "" ? null : Number(e.target.value); save(); });
     $(".av_av70", row).addEventListener("change", (e) => { AV[i].avant70 = e.target.value === "oui"; save(); });
+    $(".av_per", row).addEventListener("change", (e) => { AV[i].per = e.target.checked; save(); renderAv(); });
     $(".av_clause", row).addEventListener("input", (e) => { AV[i].clause = e.target.value; save(); });
     $(".av_verif", row).addEventListener("click", () => { AV[i].verifie = !AV[i].verifie; save(); renderAv(); });
     $(".av_del", row).addEventListener("click", () => { AV.splice(i, 1); save(); renderAv(); });
@@ -1468,7 +1470,7 @@ function buildConseilContext(d) {
   });
   (state.av || []).forEach((a) => {
     const bens = (a.beneficiaires || []).map((b) => { const nom = personne(b)?.nom || b; const pc = a.repartition?.[b]; return pc ? `${nom} ${pc}%` : nom; }).join(" / ");
-    L.push(`Assurance-vie "${a.libelle || a.id}" chez ${a.etablissement || "?"}, souscripteur ${personne(a.souscripteurId)?.nom || "?"}${a.cosouscripteurId ? " & " + (personne(a.cosouscripteurId)?.nom || "") : ""}, capital ${e(a.montant)}, primes ${a.avant70 ? "avant" : "après"} 70 ans, bénéficiaires : ${bens || "à définir"}.`);
+    L.push(`${a.per ? "PER assurantiel" : "Assurance-vie"} "${a.libelle || a.id}" chez ${a.etablissement || "?"}, souscripteur ${personne(a.souscripteurId)?.nom || "?"}${a.cosouscripteurId ? " & " + (personne(a.cosouscripteurId)?.nom || "") : ""}, capital ${e(a.montant)}, ${a.per ? "régime (990 I / 757 B) déterminé par l'âge du souscripteur au décès (primes+gains taxables si ≥70 ans)" : `primes ${a.avant70 ? "avant" : "après"} 70 ans`}, bénéficiaires : ${bens || "à définir"}.`);
   });
   (state.donations || []).forEach((x) => {
     const purge = anneesEcoulees(x.date) >= DELAI_RAPPEL_ANS;
