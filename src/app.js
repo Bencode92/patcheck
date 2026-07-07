@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=32";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=32";
-import { buildMermaid, debrief } from "./graph.js?v=32";
-import * as sync from "./sync.js?v=32";
+} from "./data.js?v=33";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=33";
+import { buildMermaid, debrief } from "./graph.js?v=33";
+import * as sync from "./sync.js?v=33";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -806,10 +806,12 @@ function renderPatrimoine() {
   const detenteursDe = (aid) => D.map((d, i) => ({ d, i })).filter((o) => o.d.actifRef === aid);
   const dettesDe = (aid) => X.map((x, i) => ({ x, i })).filter((o) => o.x.cible === aid);
 
-  const pvText = (a) =>
-    a.categorie === "immobilier" && a.prixAcq && a.valeur
-      ? `Plus-value latente : <b>${eur(a.valeur - a.prixAcq)}</b> (achat ${eur(a.prixAcq)} → marché ${eur(a.valeur)})`
-      : "";
+  const pvText = (a) => {
+    const bits = [];
+    if (a.categorie === "immobilier" && a.prixAcq && a.valeur) bits.push(`Plus-value latente : <b>${eur(a.valeur - a.prixAcq)}</b> (achat ${eur(a.prixAcq)} → marché ${eur(a.valeur)})`);
+    if ((a.categorie === "immobilier" || a.categorie === "sci") && a.surface && a.valeur) bits.push(`<b>${eur(Math.round(a.valeur / a.surface))}/m²</b> (${a.surface} m²)`);
+    return bits.join(" · ");
+  };
 
   const assetCard = (a, ai) => `
     <div class="asset-card">
@@ -818,6 +820,7 @@ function renderPatrimoine() {
         <input class="f_lib" data-ai="${ai}" placeholder="Libellé (ex : Résidence principale)" value="${a.libelle || ""}">
         <input class="f_val" data-ai="${ai}" inputmode="numeric" placeholder="${a.categorie === "immobilier" ? "Valeur marchande €" : "Valeur €"}" value="${a.valeur || ""}" style="max-width:150px">
         ${a.categorie === "immobilier" ? `<input class="f_pxacq" data-ai="${ai}" inputmode="numeric" placeholder="Prix d'achat €" value="${a.prixAcq ?? ""}" style="max-width:130px">` : ""}
+        ${(a.categorie === "immobilier" || a.categorie === "sci") ? `<input class="f_surface" data-ai="${ai}" inputmode="numeric" placeholder="Surface m²" value="${a.surface ?? ""}" style="max-width:110px">` : ""}
         ${CAT_A_BANQUE.has(a.categorie) ? `<input class="f_etab" data-ai="${ai}" list="etabs" placeholder="Banque / Courtier" value="${a.etablissement || ""}" style="max-width:160px">` : ""}
         <input class="f_an" data-ai="${ai}" type="number" min="1900" max="${yr}" placeholder="Année acquis." value="${a.annee ?? ""}" style="max-width:120px">
         ${a.categorie === "entreprise" ? `<label class="benef-chk"><input type="checkbox" class="f_dut" data-ai="${ai}" ${a.dutreil ? "checked" : ""}> Dutreil −75%</label>` : ""}
@@ -936,12 +939,13 @@ function renderPatrimoine() {
       if (t.classList.contains("f_lib")) a.libelle = t.value;
       else if (t.classList.contains("f_val")) a.valeur = parseNum(t.value);
       else if (t.classList.contains("f_pxacq")) a.prixAcq = t.value === "" ? null : parseNum(t.value);
+      else if (t.classList.contains("f_surface")) a.surface = t.value === "" ? null : parseNum(t.value);
       else if (t.classList.contains("f_etab")) a.etablissement = t.value;
       else if (t.classList.contains("f_demyr")) { a.demembrementAnnee = t.value === "" ? null : Number(t.value); save(); return; }
       else if (t.classList.contains("f_an")) a.annee = t.value === "" ? null : Number(t.value);
       else return;
-      // met à jour la plus-value affichée sans re-render (garde le focus)
-      if (t.classList.contains("f_val") || t.classList.contains("f_pxacq")) {
+      // met à jour la plus-value / €m² affiché sans re-render (garde le focus)
+      if (t.classList.contains("f_val") || t.classList.contains("f_pxacq") || t.classList.contains("f_surface")) {
         const pv = c.querySelector(`.pv-line[data-ai="${ai}"]`);
         if (pv) pv.innerHTML = pvText(a);
       }
