@@ -383,3 +383,119 @@ export function debrief(state) {
     nbEnfants: enfants.length,
   };
 }
+
+// ------------------- Simulation « décès par parent » (ordre des décès) -------------------
+// Estime le coût fiscal selon QUEL parent décède en premier, puis le conjoint « demain ».
+// v1 : hypothèses simplificatrices EXPLICITES (champ `hypothese`), à valider avec un notaire.
+// Réutilise debrief() pour les agrégats + calculDroits()/barèmes de data.js.
+export function simulerDeces(state, defuntId) {
+  const D = debrief(state);
+  const personnes = state.personnes || [];
+  const parents = personnes.filter((p) => p.role === "parent");
+  const enfants = personnes.filter((p) => p.role === "enfant");
+  const donations = state.donations || [];
+  const av = state.av || [];
+  const nomDe = (id) => personnes.find((p) => p.id === id)?.nom || id;
+  const defunt = personnes.find((p) => p.id === defuntId);
+  if (!defunt) return null;
+  const conjoint = parents.find((p) => p.id !== defuntId) || null;
+  const patrimoineTaxable = D.patrimoineTaxable;
+  const patrimoineFoyer = D.patrimoineFoyer;
+  const shareOf = (pid) => (patrimoineFoyer > 0 ? Math.max(0, D.parPersonne[pid] || 0) / patrimoineFoyer : 0);
+  const regime = state.regime || "";
+
+  // Masse taxable des BIENS attribuée à chaque décès + hypothèse retenue
+  let attribution = false, masseBiens1, masseBiens2, hypothese;
+  if (!conjoint) {
+    masseBiens1 = patrimoineTaxable; masseBiens2 = 0;
+    hypothese = "Parent seul : transmission directe aux enfants (2 abattements non applicables).";
+  } else if (regime === "universelle_attribution") {
+    attribution = true; masseBiens1 = 0; masseBiens2 = patrimoineTaxable;
+    hypothese = "Communauté universelle + attribution intégrale : au 1er décès tout revient au conjoint sans droits ; les enfants ne sont taxés qu'au 2d décès, avec un SEUL abattement de 100 000 € par enfant (celui du 1er parent est perdu).";
+  } else if (regime === "universelle") {
+    masseBiens1 = patrimoineTaxable * 0.5; masseBiens2 = patrimoineTaxable * 0.5;
+    hypothese = "Communauté universelle : masse partagée 50/50, les enfants héritent en pleine propriété de la part du défunt à chaque décès (hypothèse v1).";
+  } else if (regime === "acquets") {
+    masseBiens1 = patrimoineTaxable * shareOf(defuntId); masseBiens2 = patrimoineTaxable * shareOf(conjoint.id);
+    hypothese = "Communauté réduite aux acquêts (v1) : part de chacun estimée d'après sa détention dans l'app, enfants héritant en pleine propriété. Hypothèse simplifiée — l'usufruit légal du conjoint n'est pas modélisé.";
+  } else {
+    masseBiens1 = patrimoineTaxable * shareOf(defuntId); masseBiens2 = patrimoineTaxable * shareOf(conjoint.id);
+    hypothese = "Estimation non différenciée par régime (v1) : part de chacun estimée d'après sa détention dans l'app.";
+  }
+
+  // Droits ligne directe des enfants sur une masse (abattement du parent concerné, rapport donations <15 ans)
+  const partEnfants = (masse, parentId) => {
+    if (!enfants.length || masse <= 0) return { rows: [], total: 0 };
+    const part = masse / enfants.length;
+    const rows = enfants.map((enf) => {
+      const consomme = parentId
+        ? donations.filter((d) => d.donateurId === parentId && d.beneficiaireId === enf.id && anneesEcoulees(d.date) < DELAI_RAPPEL_ANS).reduce((s, d) => s + d.montant, 0)
+        : 0;
+      const ab = Math.max(0, ABATTEMENTS.enfant - consomme);
+      const base = Math.max(0, part - ab);
+      const droits = calculDroits(base, BAREME_LIGNE_DIRECTE);
+      return { nom: enf.nom, recu: part, abattement: ab, base, droits, net: part - droits };
+    });
+    return { rows, total: rows.reduce((s, r) => s + r.droits, 0) };
+  };
+
+  // Taxation 990 I (primes avant 70 ans) par bénéficiaire, sur un jeu de contrats
+  const taxeAV990 = (contrats) => {
+    const benef = {};
+    contrats.filter((a) => a.avant70).forEach((a) => {
+      const m = Number(a.montant) || 0; const bens = a.beneficiaires || []; if (!bens.length || m <= 0) return;
+      const rep = a.repartition || {}; const tot = bens.reduce((s, b) => s + (Number(rep[b]) || 0), 0);
+      bens.forEach((b) => { const sh = tot > 0 ? (Number(rep[b]) || 0) / tot : 1 / bens.length; benef[b] = (benef[b] || 0) + m * sh; });
+    });
+    return Object.entries(benef).map(([pid, cap]) => {
+      const base = Math.max(0, cap - AV_AVANT_70.abattement);
+      const t1 = Math.min(base, AV_AVANT_70.seuilTranche1), t2 = Math.max(0, base - AV_AVANT_70.seuilTranche1);
+      const droits = Math.round(t1 * AV_AVANT_70.tauxTranche1 + t2 * AV_AVANT_70.tauxTranche2);
+      return { nom: nomDe(pid), capital: cap, abattement: Math.min(cap, AV_AVANT_70.abattement), base, droits, net: cap - droits };
+    }).filter((x) => x.capital > 0);
+  };
+  // Primes après 70 ans réintégrées (au-delà de l'abattement global 30 500 €)
+  const reintegreApres70 = (contrats) => Math.max(0, contrats.filter((a) => !a.avant70).reduce((t, a) => t + (Number(a.montant) || 0), 0) - AV_APRES_70.abattementGlobal);
+
+  // Contrats dénoués : au 1er décès ceux du défunt (hors co-adhésion) ; au 2d ceux du conjoint + toute co-adhésion
+  const contrats1 = av.filter((a) => a.souscripteurId === defuntId && !a.cosouscripteurId);
+  const contrats2 = av.filter((a) => (conjoint && a.souscripteurId === conjoint.id && !a.cosouscripteurId) || a.cosouscripteurId);
+
+  // 1er décès
+  const reint1 = reintegreApres70(contrats1);
+  const enf1 = partEnfants(masseBiens1 + reint1, defuntId);
+  const av1 = taxeAV990(contrats1);
+  const droitsAV1 = av1.reduce((s, x) => s + x.droits, 0);
+  const avDenouees1 = contrats1.filter((a) => a.avant70).map((a) => ({ contrat: a.libelle || a.id, beneficiaires: taxeAV990([a]) }));
+  const totalDroitsPremier = enf1.total + droitsAV1;
+  const abattementsPerdus = attribution ? ABATTEMENTS.enfant * enfants.length : 0;
+
+  // 2d décès (conjoint survivant, « demain »)
+  const reint2 = reintegreApres70(contrats2);
+  const enf2 = partEnfants(masseBiens2 + reint2, conjoint ? conjoint.id : null);
+  const av2 = taxeAV990(contrats2);
+  const droitsAV2 = av2.reduce((s, x) => s + x.droits, 0);
+  const totalDroitsSecond = enf2.total + droitsAV2;
+
+  return {
+    defunt: { id: defunt.id, nom: defunt.nom, age: ageDePers(defunt) },
+    conjoint: conjoint ? { id: conjoint.id, nom: conjoint.nom } : null,
+    hypothese,
+    premierDeces: {
+      masseDefunt: masseBiens1,
+      recuConjoint: attribution ? patrimoineFoyer : 0,
+      droitsConjoint: 0,
+      partEnfants: enf1.rows,
+      avDenouees: avDenouees1,
+      totalDroitsPremier,
+      abattementsPerdus,
+    },
+    secondDeces: {
+      masse: masseBiens2 + reint2,
+      parEnfant: enf2.rows,
+      avDenouees: av2,
+      totalDroitsSecond,
+    },
+    totalOrdre: totalDroitsPremier + totalDroitsSecond,
+  };
+}
