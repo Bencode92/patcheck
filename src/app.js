@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=26";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=26";
-import { buildMermaid, debrief } from "./graph.js?v=26";
-import * as sync from "./sync.js?v=26";
+} from "./data.js?v=27";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=27";
+import { buildMermaid, debrief } from "./graph.js?v=27";
+import * as sync from "./sync.js?v=27";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -425,8 +425,8 @@ async function renderOrganigramme() {
     const bienRows = items.map((it) => `<tr>
       <td>${CAT_LOOKUP[it.categorie] || it.categorie} · ${it.libelle}</td>
       <td>${it.part} %</td>
-      <td>${it.droit === "PP" ? '<span class="muted small">pleine propriété</span>' : droitBadge(it.droit)}</td>
-      <td style="text-align:right"><b>${eur(it.valeur)}</b></td>
+      <td>${it.droit === "PP" ? '<span class="muted small">pleine propriété</span>' : `${droitBadge(it.droit)} <span class="muted small">${Math.round(it.fraction * 100)} % (669, usuf. ${it.usuAge} ans)</span>`}</td>
+      <td style="text-align:right"><b>${eur(it.valeur)}</b>${it.droit !== "PP" ? `<div class="muted small">${it.part}% × ${Math.round(it.fraction * 100)}%</div>` : ""}</td>
     </tr>`).join("");
     const avRows = avItems.map((it) => `<tr style="background:rgba(224,72,154,.06)">
       <td>🛡️ ${it.lib}${it.co ? ' <span class="muted small">(co-adh. ½)</span>' : ""}</td>

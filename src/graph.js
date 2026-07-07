@@ -1,7 +1,7 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=26";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=27";
 
 // Âge d'une personne (année de naissance / âge saisi / date)
 function ageDePers(p) {
@@ -137,12 +137,9 @@ export function debrief(state) {
 
   // Valeur ÉCONOMIQUE d'une détention : PP = pleine ; US = %usufruit ; NP = %nue-propriété
   // (US + NP sur les mêmes parts = la valeur pleine, pas de double compte).
-  const valeurEconomique = (d) => {
-    const brut = (actifNet(d.actifRef) * (Number(d.part) || 0)) / 100;
-    if (d.droit === "US") return brut * tauxUsufruit(usuAge(d.actifRef));
-    if (d.droit === "NP") return brut * (1 - tauxUsufruit(usuAge(d.actifRef)));
-    return brut;
-  };
+  const fractionDroit = (d) =>
+    d.droit === "US" ? tauxUsufruit(usuAge(d.actifRef)) : d.droit === "NP" ? 1 - tauxUsufruit(usuAge(d.actifRef)) : 1;
+  const valeurEconomique = (d) => (actifNet(d.actifRef) * (Number(d.part) || 0)) / 100 * fractionDroit(d);
 
   // Patrimoine NET détenu par les personnes (biens logés en SCI non recomptés :
   // les personnes détiennent les parts de SCI ; dette de la SCI déjà déduite).
@@ -157,7 +154,7 @@ export function debrief(state) {
     const val = valeurEconomique(d); // US/NP valorisés au barème 669
     parPersonne[d.proprietaire] += val;
     patrimoineFoyer += val;
-    parPersonneDetail[d.proprietaire].push({ libelle: a.libelle || a.id, categorie: a.categorie, part: d.part, droit: d.droit, valeur: val });
+    parPersonneDetail[d.proprietaire].push({ libelle: a.libelle || a.id, categorie: a.categorie, part: d.part, droit: d.droit, valeur: val, fraction: fractionDroit(d), usuAge: usuAge(d.actifRef) });
   });
   // Dettes personnelles
   Object.entries(detteParPersonne).forEach(([pid, m]) => {
