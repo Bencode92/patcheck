@@ -1,16 +1,21 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=27";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=28";
 
-// Âge d'une personne (année de naissance / âge saisi / date)
-function ageDePers(p) {
+// Année de naissance d'une personne (année / date / déduite de l'âge)
+function birthYear(p) {
   if (!p) return null;
-  const y = new Date().getFullYear();
-  if (p.annee) return y - Number(p.annee);
-  if (p.age != null && p.age !== "") return Number(p.age);
-  if (p.naissance) { const n = new Date(p.naissance); return Number.isFinite(n.getFullYear()) ? y - n.getFullYear() : null; }
+  if (p.annee) return Number(p.annee);
+  if (p.naissance) { const n = new Date(p.naissance); return Number.isFinite(n.getFullYear()) ? n.getFullYear() : null; }
+  if (p.age != null && p.age !== "") return new Date().getFullYear() - Number(p.age);
   return null;
+}
+// Âge d'une personne aujourd'hui (ou à un millésime donné)
+function ageDePers(p, anneeRef) {
+  const by = birthYear(p);
+  if (by == null) return null;
+  return (anneeRef || new Date().getFullYear()) - by;
 }
 
 // Taux d'exonération Dutreil (art. 787 B) sur les titres de société éligibles
@@ -123,15 +128,18 @@ export function debrief(state) {
     return a ? Math.max(0, a.valeur - (detteParActif[id] || 0)) : 0;
   };
 
-  // Âge de l'usufruitier par actif (pour valoriser US / NP au barème 669)
+  // Âge de l'usufruitier par actif, FIGÉ à l'année du démembrement (barème 669
+  // cristallisé à la date de la donation, pas recalculé au fil du temps).
   const usuAgeParActif = {};
   detentions.forEach((d) => {
     if (d.droit === "US") {
-      const age = ageDePers(personnes.find((p) => p.id === d.proprietaire));
+      const a = actif(d.actifRef);
+      const anneeRef = a && a.demembrementAnnee ? Number(a.demembrementAnnee) : undefined;
+      const age = ageDePers(personnes.find((p) => p.id === d.proprietaire), anneeRef);
       if (age != null) usuAgeParActif[d.actifRef] = age;
     }
   });
-  const agesParents = parents.map(ageDePers).filter((a) => a != null);
+  const agesParents = parents.map((p) => ageDePers(p)).filter((a) => a != null);
   const oldestParent = agesParents.length ? Math.max(...agesParents) : 65;
   const usuAge = (actifId) => usuAgeParActif[actifId] ?? oldestParent;
 

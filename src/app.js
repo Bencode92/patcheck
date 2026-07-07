@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=27";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=27";
-import { buildMermaid, debrief } from "./graph.js?v=27";
-import * as sync from "./sync.js?v=27";
+} from "./data.js?v=28";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=28";
+import { buildMermaid, debrief } from "./graph.js?v=28";
+import * as sync from "./sync.js?v=28";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -30,6 +30,14 @@ function ageAu(naissance, dateRef = new Date()) {
   const m = dateRef.getMonth() - n.getMonth();
   if (m < 0 || (m === 0 && dateRef.getDate() < n.getDate())) age--;
   return age;
+}
+// Année de naissance (année / date / déduite de l'âge) — pour figer le barème 669
+function birthYearOf(p) {
+  if (!p) return null;
+  if (p.annee) return Number(p.annee);
+  if (p.naissance) { const y = new Date(p.naissance).getFullYear(); return Number.isFinite(y) ? y : null; }
+  if (p.age != null && p.age !== "") return new Date().getFullYear() - Number(p.age);
+  return null;
 }
 // Âge d'une personne : date complète d'abord (exact), sinon année seule, sinon âge saisi
 function ageDe(p) {
@@ -827,6 +835,7 @@ function renderPatrimoine() {
             <button class="danger-link" data-del="detention" data-di="${i}">✕</button>
           </div>`).join("") || `<div class="muted small">Aucun détenteur pour l'instant.</div>`}
         <button class="btn small" data-add="detenteur" data-ai="${ai}">+ détenteur</button>
+        ${detenteursDe(a.id).some((o) => o.d.droit !== "PP") ? `<label class="muted small" style="display:flex;gap:6px;align-items:center;margin-top:8px">Année du démembrement (fige le barème 669) <input class="f_demyr" data-ai="${ai}" type="number" min="1990" max="${yr}" placeholder="ex : 2025" value="${a.demembrementAnnee ?? ""}" style="max-width:110px"></label>` : ""}
       </div>
 
       <div class="asset-sub">
@@ -928,6 +937,7 @@ function renderPatrimoine() {
       else if (t.classList.contains("f_val")) a.valeur = parseNum(t.value);
       else if (t.classList.contains("f_pxacq")) a.prixAcq = t.value === "" ? null : parseNum(t.value);
       else if (t.classList.contains("f_etab")) a.etablissement = t.value;
+      else if (t.classList.contains("f_demyr")) { a.demembrementAnnee = t.value === "" ? null : Number(t.value); save(); return; }
       else if (t.classList.contains("f_an")) a.annee = t.value === "" ? null : Number(t.value);
       else return;
       // met à jour la plus-value affichée sans re-render (garde le focus)
@@ -1324,7 +1334,9 @@ function renderEntreprise() {
     const valeur = Number(a.valeur) || 0;
     const usDet = dets.find((o) => o.d.droit === "US");
     const usPers = usDet ? personne(usDet.d.proprietaire) : null;
-    const age = usPers ? ageDe(usPers) : null;
+    const by = birthYearOf(usPers);
+    const anneeRef = a.demembrementAnnee ? Number(a.demembrementAnnee) : new Date().getFullYear();
+    const age = by != null ? anneeRef - by : null;
     const tUS = age != null ? tauxUsufruit(age) : null;
     const npVal = tUS != null ? valeur * (1 - tUS) : null;
     const sommeParts = dets.reduce((s, o) => s + (Number(o.d.part) || 0), 0);
@@ -1337,7 +1349,8 @@ function renderEntreprise() {
       </div>
       <div class="benef-row">
         <label class="benef-chk"><input type="checkbox" class="e_dut" data-ai="${ai}" ${a.dutreil ? "checked" : ""}> Pacte Dutreil (exonération 75 %)</label>
-        ${a.dutreil ? `<label style="max-width:220px">Année engagement collectif<input class="e_dutan" data-ai="${ai}" type="number" min="1990" max="${new Date().getFullYear()}" value="${a.dutreilAnnee ?? ""}"></label>` : ""}
+        ${a.dutreil ? `<label style="max-width:200px">Année engagement collectif<input class="e_dutan" data-ai="${ai}" type="number" min="1990" max="${new Date().getFullYear()}" value="${a.dutreilAnnee ?? ""}"></label>` : ""}
+        <label style="max-width:220px">Année du démembrement<input class="e_demyr" data-ai="${ai}" type="number" min="1990" max="${new Date().getFullYear()}" placeholder="fige le barème 669" value="${a.demembrementAnnee ?? ""}"></label>
         <button class="danger-link" data-del="entreprise" data-ai="${ai}" title="Supprimer" style="margin-left:auto">🗑</button>
       </div>
 
@@ -1358,7 +1371,7 @@ function renderEntreprise() {
         <div class="line"><span>Valeur des titres</span><b>${eur(valeur)}</b></div>
         ${a.dutreil ? `<div class="line"><span>Exonération Dutreil (−75 %, art. 787 B)</span><b style="color:var(--accent-2)">− ${eur(valeur * 0.75)}</b></div>
         <div class="line total"><span>Assiette taxable en transmission</span><b>${eur(valeur * 0.25)}</b></div>` : `<div class="line"><span class="muted small">Sans pacte Dutreil : assiette taxable = valeur pleine.</span></div>`}
-        ${tUS != null ? `<div class="line"><span>Démembrement — usufruitier ${usPers.nom} (${age} ans) → usufruit ${pct(tUS)} / NP ${pct(1 - tUS)}</span><b>NP transmise : ${eur(npVal)}</b></div>` : ""}
+        ${tUS != null ? `<div class="line"><span>Démembrement — usufruitier ${usPers.nom} (${age} ans${a.demembrementAnnee ? " en " + a.demembrementAnnee : ", âge actuel"}) → usufruit ${pct(tUS)} / NP ${pct(1 - tUS)}</span><b>NP transmise : ${eur(npVal)}</b></div>` : ""}
       </div>
     </div>`;
   };
@@ -1407,6 +1420,7 @@ function renderEntreprise() {
       else if (t.classList.contains("e_val")) { a.valeur = parseNum(t.value); save(); renderEntreprise(); return; }
       else if (t.classList.contains("e_an")) a.annee = t.value === "" ? null : Number(t.value);
       else if (t.classList.contains("e_dutan")) a.dutreilAnnee = t.value === "" ? null : Number(t.value);
+      else if (t.classList.contains("e_demyr")) { a.demembrementAnnee = t.value === "" ? null : Number(t.value); save(); renderEntreprise(); return; }
       else return;
       save();
     } else if (t.dataset.di != null && t.classList.contains("ed_part")) {
