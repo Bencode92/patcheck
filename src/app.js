@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=20";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=20";
-import { buildMermaid, debrief } from "./graph.js?v=20";
-import * as sync from "./sync.js?v=20";
+} from "./data.js?v=21";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=21";
+import { buildMermaid, debrief } from "./graph.js?v=21";
+import * as sync from "./sync.js?v=21";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -224,9 +224,11 @@ function exporterResume() {
   push("Assiette taxable (succession)", euro(d.patrimoineTaxable));
   push("Droits de succession estimés (décès des 2 parents)", euro(d.droitsSuccessionEstimes));
   push("");
-  const totalCat = Object.values(d.parCategorie).reduce((s, v) => s + v, 0) || 1;
+  const expoCsv = {};
+  Object.entries(d.parCategorie).forEach(([k, v]) => { const key = k === "sci" ? "immobilier (dont SCI)" : k; expoCsv[key] = (expoCsv[key] || 0) + v; });
+  const totalCat = Object.values(expoCsv).reduce((s, v) => s + v, 0) || 1;
   push("EXPOSITION PAR CATÉGORIE", "Valeur", "Part");
-  Object.entries(d.parCategorie).sort((a, b) => b[1] - a[1]).forEach(([k, v]) => push(k, euro(v), (v / totalCat * 100).toFixed(0) + " %"));
+  Object.entries(expoCsv).sort((a, b) => b[1] - a[1]).forEach(([k, v]) => push(k, euro(v), (v / totalCat * 100).toFixed(0) + " %"));
   push("");
   push("PATRIMOINE PAR PERSONNE", "Rôle", "Montant net");
   state.personnes.forEach((p) => push(p.nom, p.role, euro(d.parPersonne[p.id] || 0)));
@@ -398,9 +400,16 @@ async function renderOrganigramme() {
   const persoRows = state.personnes
     .map((p) => `<div class="line"><span>${p.nom} <small class="muted">(${p.role})</small></span><b>${eur(d.parPersonne[p.id] || 0)}</b></div>`)
     .join("");
-  const CAT_LBL = { immobilier: "🏠 Immobilier", sci: "🏢 SCI", entreprise: "🏭 Entreprise", liquidites: "💶 Liquidités", titres: "📈 Titres", autre: "Autre" };
-  const totalCat = Object.values(d.parCategorie).reduce((s, v) => s + v, 0) || 1;
-  const catRows = Object.entries(d.parCategorie)
+  // Exposition : les SCI sont regroupées avec l'immobilier (ce sont des biens immo)
+  const hasSci = (d.parCategorie.sci || 0) > 0;
+  const expo = {};
+  Object.entries(d.parCategorie).forEach(([k, v]) => {
+    const key = k === "sci" ? "immobilier" : k;
+    expo[key] = (expo[key] || 0) + v;
+  });
+  const CAT_LBL = { immobilier: hasSci ? "🏠 Immobilier (dont SCI)" : "🏠 Immobilier", entreprise: "🏭 Entreprise", liquidites: "💶 Liquidités", titres: "📈 Titres", autre: "Autre" };
+  const totalCat = Object.values(expo).reduce((s, v) => s + v, 0) || 1;
+  const catRows = Object.entries(expo)
     .sort((a, b) => b[1] - a[1])
     .map(([k, v]) => {
       const p = (v / totalCat) * 100;
