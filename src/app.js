@@ -2,10 +2,10 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=17";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=17";
-import { buildMermaid, debrief } from "./graph.js?v=17";
-import * as sync from "./sync.js?v=17";
+} from "./data.js?v=18";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=18";
+import { buildMermaid, debrief } from "./graph.js?v=18";
+import * as sync from "./sync.js?v=18";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -698,6 +698,8 @@ const ownerList = () => [
   ...(state.actifs || []).map((a) => [a.id, "🏦 " + (a.libelle || a.id)]),
 ];
 const actifList = () => (state.actifs || []).map((a) => [a.id, (a.libelle || a.id)]);
+const CAT_LOOKUP = Object.fromEntries(CATEGORIES);
+const collapsedCats = new Set(); // catégories repliées (état d'affichage, non sauvegardé)
 
 const REGIMES = [
   ["", "— non précisé —"],
@@ -774,17 +776,49 @@ function renderPatrimoine() {
       </div>
     </div>`;
 
+  // Regroupement des biens par catégorie (repliables)
+  const items = A.map((a, ai) => ({ a, ai }));
+  const catsPresentes = CATEGORIES.map(([k]) => k).filter((k) => items.some((it) => it.a.categorie === k));
+  const autres = items.filter((it) => !CAT_LOOKUP[it.a.categorie]); // catégories inconnues -> "autre"
+  const groupesHtml = catsPresentes.map((key) => {
+    const grp = items.filter((it) => it.a.categorie === key);
+    const total = grp.reduce((s, it) => s + (Number(it.a.valeur) || 0), 0);
+    const dette = (state.dettes || []).filter((x) => grp.some((it) => it.a.id === x.cible)).reduce((s, x) => s + (Number(x.montant) || 0), 0);
+    const net = total - dette;
+    const collapsed = collapsedCats.has(key);
+    return `<div class="cat-group">
+      <button class="cat-header" data-togglecat="${key}">
+        <span>${CAT_LOOKUP[key] || key} <span class="muted small">· ${grp.length} bien(s) · net ${eur(net)}</span></span>
+        <span class="chevron">${collapsed ? "▸" : "▾"}</span>
+      </button>
+      ${collapsed ? "" : `<div class="cat-body">${grp.map((it) => assetCard(it.a, it.ai)).join("")}</div>`}
+    </div>`;
+  }).join("");
+
   c.innerHTML = `
     <div class="card">
-      <h2>🏦 Patrimoine — biens, détention & dettes</h2>
-      <p class="muted small">Un bloc par bien (immobilier, SCI, entreprise, compte…). Sous chaque bien : <b>qui le détient</b> (avec démembrement) et <b>la dette qui lui est liée</b>. Pour une SCI qui détient un immeuble, ajoute la SCI comme détenteur de l'immeuble.</p>
-      ${A.map(assetCard).join("") || `<p class="muted">Aucun bien pour l'instant. Ajoute ton premier bien ci-dessous.</p>`}
-      <button class="btn primary" data-add="actif">+ Ajouter un bien</button>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <h2 style="margin:0">🏦 Patrimoine — biens, détention & dettes</h2>
+        ${A.length ? `<div style="display:flex;gap:8px"><button class="btn small" id="collapse_all">Tout replier</button><button class="btn small" id="expand_all">Tout déplier</button></div>` : ""}
+      </div>
+      <p class="muted small">Regroupé par catégorie (clique un en-tête pour replier/déplier). Sous chaque bien : <b>qui le détient</b> (démembrement) et <b>la dette liée</b>.</p>
+      ${groupesHtml || `<p class="muted">Aucun bien pour l'instant. Ajoute ton premier bien ci-dessous.</p>`}
+      <button class="btn primary" data-add="actif" style="margin-top:6px">+ Ajouter un bien</button>
     </div>
     <p class="muted small center">💾 Enregistrement automatique (local + cloud). Résultat dans <b>🏠 Résumé patrimonial</b>.</p>`;
 
   // --- Câblage par DÉLÉGATION (indices portés par data-attributes -> fiable) ---
   c.onclick = (e) => {
+    // Repli/dépli des groupes de catégories
+    const catBtn = e.target.closest("[data-togglecat]");
+    if (catBtn) {
+      const k = catBtn.dataset.togglecat;
+      collapsedCats.has(k) ? collapsedCats.delete(k) : collapsedCats.add(k);
+      renderPatrimoine(); return;
+    }
+    if (e.target.closest("#collapse_all")) { catsPresentes.forEach((k) => collapsedCats.add(k)); renderPatrimoine(); return; }
+    if (e.target.closest("#expand_all")) { collapsedCats.clear(); renderPatrimoine(); return; }
+
     const add = e.target.closest("[data-add]");
     if (add) {
       const kind = add.dataset.add;
