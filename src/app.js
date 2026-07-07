@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=42";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=42";
-import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=42";
-import * as sync from "./sync.js?v=42";
-import { askAI } from "./ai.js?v=42";
+} from "./data.js?v=43";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=43";
+import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=43";
+import * as sync from "./sync.js?v=43";
+import { askAI } from "./ai.js?v=43";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1205,7 +1205,7 @@ function renderAv() {
           <div class="form-row">
             <label>Capital (€)<input class="av_mnt" value="${a.montant || ""}" inputmode="numeric"></label>
             <label>Année d'ouverture<input class="av_an" type="number" min="1950" max="${new Date().getFullYear()}" placeholder="ex : 2008" value="${a.annee ?? ""}"></label>
-            <label>Régime des primes<select class="av_av70" ${a.per ? "disabled title='Déterminé automatiquement par l\\'âge au décès pour un PER'" : ""}>${opt([["oui", "Avant 70 ans"], ["non", "Après 70 ans"]], a.avant70 ? "oui" : "non")}</select></label>
+            <label>Régime des primes<select class="av_av70" ${a.per ? 'disabled title="Déterminé automatiquement par l’âge au décès pour un PER"' : ""}>${opt([["oui", "Avant 70 ans"], ["non", "Après 70 ans"]], a.avant70 ? "oui" : "non")}</select></label>
           </div>
           <label class="benef-chk" style="margin-top:2px"><input type="checkbox" class="av_per" ${a.per ? "checked" : ""}> 🏦 <b>PER assurantiel</b> <span class="muted small">— régime déterminé par l'âge du souscripteur au décès (&lt; 70 → 990 I ; ≥ 70 → 757 B, primes + gains). Saisis la valeur TOTALE du contrat.</span></label>
           <div class="benef-row"><span class="muted small">Bénéficiaires :</span> ${benefBoxes(a, i)}
