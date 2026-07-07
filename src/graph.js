@@ -1,7 +1,7 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=36";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=37";
 
 // Année de naissance : la DATE complète prime (plus précise), puis année seule, puis âge
 function birthYear(p) {
@@ -211,6 +211,34 @@ export function debrief(state) {
   let avAvant70 = 0, avApres70 = 0;
   av.forEach((a) => (a.avant70 ? (avAvant70 += a.montant) : (avApres70 += a.montant)));
 
+  // AV : capital réparti par bénéficiaire (selon répartition %, sinon parts égales)
+  const avBenef = {};
+  av.forEach((a) => {
+    const m = Number(a.montant) || 0;
+    const bens = a.beneficiaires || [];
+    if (!bens.length || m <= 0) return;
+    const rep = a.repartition || {};
+    const totalRep = bens.reduce((s, b) => s + (Number(rep[b]) || 0), 0);
+    bens.forEach((b) => {
+      const share = totalRep > 0 ? (Number(rep[b]) || 0) / totalRep : 1 / bens.length;
+      (avBenef[b] ||= { avant70: 0, apres70: 0 });
+      if (a.avant70) avBenef[b].avant70 += m * share;
+      else avBenef[b].apres70 += m * share;
+    });
+  });
+  // Droits 990 I (primes avant 70 ans) par bénéficiaire
+  const avBeneficiaires = Object.entries(avBenef).map(([pid, v]) => {
+    const nom = personnes.find((p) => p.id === pid)?.nom || pid;
+    const base = Math.max(0, v.avant70 - AV_AVANT_70.abattement);
+    const t1 = Math.min(base, AV_AVANT_70.seuilTranche1);
+    const t2 = Math.max(0, base - AV_AVANT_70.seuilTranche1);
+    const droits = Math.round(t1 * AV_AVANT_70.tauxTranche1 + t2 * AV_AVANT_70.tauxTranche2);
+    return { nom, capital: v.avant70, apres70: v.apres70, abattement: Math.min(v.avant70, AV_AVANT_70.abattement), base, droits, net: v.avant70 - droits };
+  }).filter((x) => x.capital > 0);
+  const totalDroitsAV = avBeneficiaires.reduce((s, x) => s + x.droits, 0);
+  // Primes après 70 ans (757 B) : au-delà de l'abattement global, réintégrées à la succession
+  const apres70Reintegre = Math.max(0, avApres70 - AV_APRES_70.abattementGlobal);
+
   // « Si décès aujourd'hui » — détail par enfant.
   // Hypothèse simple : patrimoine réparti également entre les enfants, chaque
   // enfant bénéficiant d'un abattement de 100 000 € par parent (art. 779),
@@ -249,6 +277,20 @@ export function debrief(state) {
       tauxEffectif: partParEnfant > 0 ? droits / partParEnfant : 0,
     });
   });
+
+  // Base successorale GLOBALE = assiette taxable des biens + AV après 70 ans réintégrée.
+  // Droits recalculés sur cette base (l'AV après 70 ans est taxée au barème succession).
+  const baseSuccessoraleGlobale = patrimoineTaxable + apres70Reintegre;
+  let droitsSuccessionGlobaux = 0;
+  if (enfants.length) {
+    const partGlob = baseSuccessoraleGlobale / enfants.length;
+    enfants.forEach((enf) => {
+      const consomme = donations.filter((d) => d.beneficiaireId === enf.id && anneesEcoulees(d.date) < DELAI_RAPPEL_ANS).reduce((s, d) => s + d.montant, 0);
+      const ab = Math.max(0, ABATTEMENTS.enfant * parents.length - consomme);
+      droitsSuccessionGlobaux += calculDroits(Math.max(0, partGlob - ab), BAREME_LIGNE_DIRECTE);
+    });
+  }
+  const totalDroitsTous = droitsSuccessionGlobaux + totalDroitsAV;
 
   // ------- Scénarios de transmission aux enfants (ordre des décès / régime) -------
   // Hypothèse couple (2 parents). Estimation ligne directe, hors assurance-vie.
@@ -318,6 +360,12 @@ export function debrief(state) {
     totalDettes,
     regime: state.regime || "",
     parPersonneDetail,
+    avBeneficiaires,
+    totalDroitsAV,
+    apres70Reintegre,
+    baseSuccessoraleGlobale,
+    droitsSuccessionGlobaux,
+    totalDroitsTous,
     scenarios,
     reco,
     parPersonne,

@@ -387,6 +387,14 @@ input[type="checkbox"], input[type="radio"] {
 .badge.ok { background: #e5f7f0; color: #067a56; border-color: #bfe9da; }
 .badge.warn { background: #fdf3e4; color: #96570a; border-color: #f3ddba; }
 
+.perso-details { border: 1px solid var(--line); border-radius: 12px; margin-bottom: 12px; background: var(--panel-2); overflow: hidden; }
+.perso-sum { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 15px; cursor: pointer; list-style: none; user-select: none; }
+.perso-sum::-webkit-details-marker { display: none; }
+.perso-sum > span:first-child::before { content: "▸"; color: var(--muted); margin-right: 7px; transition: transform .15s; display: inline-block; }
+.perso-details[open] .perso-sum > span:first-child::before { transform: rotate(90deg); }
+.perso-details[open] .perso-sum { border-bottom: 1px solid var(--line); }
+.perso-details > table, .perso-details > .muted { margin: 0 15px 14px; width: calc(100% - 30px); }
+
 .chat-box { max-height: 460px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 6px 2px; }
 .bubble { max-width: 88%; padding: 11px 15px; border-radius: 14px; font-size: 14px; line-height: 1.5; white-space: normal; }
 .bubble.user { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }

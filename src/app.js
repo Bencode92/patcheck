@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=36";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=36";
-import { buildMermaid, debrief } from "./graph.js?v=36";
-import * as sync from "./sync.js?v=36";
-import { askAI } from "./ai.js?v=36";
+} from "./data.js?v=37";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=37";
+import { buildMermaid, debrief } from "./graph.js?v=37";
+import * as sync from "./sync.js?v=37";
+import { askAI } from "./ai.js?v=37";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -444,20 +444,21 @@ async function renderOrganigramme() {
       <td colspan="2"><span class="muted small">assurance-vie · hors succession</span></td>
       <td style="text-align:right"><b>${eur(it.val)}</b></td>
     </tr>`).join("");
-    return `<div class="asset-card">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-        <b style="font-size:15px">${p.nom} <span class="muted small">(${p.role})</span></b>
+    const roleLbl = p.role === "parent" ? "Parent" : p.role === "enfant" ? "Enfant" : p.role;
+    return `<details class="perso-details" open>
+      <summary class="perso-sum">
+        <span><b style="font-size:15px">${p.nom}</b> <span class="badge ${p.role === "parent" ? "warn" : "ok"}">${roleLbl}</span> <span class="muted small">${items.length} bien(s)${avItems.length ? " + AV" : ""}</span></span>
         <b style="color:var(--accent);font-size:16px">${eur(grand)}</b>
-      </div>
+      </summary>
       ${(items.length || avItems.length)
-        ? `<table class="grid"><thead><tr><th>Détenu</th><th>Part</th><th>Droit</th><th style="text-align:right">Valeur</th></tr></thead><tbody>
+        ? `<table class="grid"><thead><tr><th>Bien / actif détenu</th><th>Quote-part</th><th>Droit</th><th style="text-align:right">Valeur détenue</th></tr></thead><tbody>
           ${bienRows}${avRows}
           </tbody>
           <tfoot>
             ${avItems.length ? `<tr><td colspan="3" class="muted small">dont biens ${eur(bienTotal)} + assurance-vie ${eur(avPerso)}</td><td></td></tr>` : ""}
           </tfoot></table>`
         : `<div class="muted small" style="margin-top:6px">Rien de détenu pour l'instant.</div>`}
-    </div>`;
+    </details>`;
   }).join("");
   // Exposition : SCI regroupées avec l'immobilier, assurance-vie ajoutée comme classe d'actif
   const hasSci = (d.parCategorie.sci || 0) > 0;
@@ -614,6 +615,45 @@ async function renderOrganigramme() {
         <td style="color:var(--warn)"><b>${eur(d.droitsSuccessionEstimes)}</b></td><td></td><td></td>
       </tr></tfoot>
       </table>
+    </div>
+
+    ${
+      (d.avBeneficiaires || []).length
+        ? `<div class="card">
+      <h2>🛡️ Assurance-vie — ce que touche chaque bénéficiaire (990 I)</h2>
+      <p class="muted small">Primes versées <b>avant 70 ans</b> : abattement de 152 500 € <b>par bénéficiaire</b>, puis 20 % jusqu'à 700 700 € et 31,25 % au-delà. Capital réparti selon la clause bénéficiaire de chaque contrat.</p>
+      <table class="grid"><thead><tr>
+        <th>Bénéficiaire</th><th>Capital reçu</th><th>Abattement</th><th>Base taxable</th><th>Droits (990 I)</th><th>Net perçu</th>
+      </tr></thead><tbody>
+      ${d.avBeneficiaires.map((x) => `<tr>
+        <td><b>${x.nom}</b></td>
+        <td>${eur(x.capital)}</td>
+        <td>− ${eur(x.abattement)}</td>
+        <td>${eur(x.base)}</td>
+        <td style="color:var(--warn)"><b>${eur(x.droits)}</b></td>
+        <td>${eur(x.net)}</td>
+      </tr>`).join("")}
+      </tbody>
+      <tfoot><tr>
+        <th>Total</th><td>${eur(d.avBeneficiaires.reduce((s, x) => s + x.capital, 0))}</td><td></td><td></td>
+        <td style="color:var(--warn)"><b>${eur(d.totalDroitsAV)}</b></td><td></td>
+      </tr></tfoot>
+      </table>
+      ${d.apres70Reintegre > 0 ? `<p class="muted small" style="margin-top:10px">💡 Primes versées <b>après 70 ans</b> : abattement global de 30 500 €, l'excédent (<b>${eur(d.apres70Reintegre)}</b>) est réintégré à la base successorale ci-dessous (art. 757 B) et taxé au barème succession.</p>` : ""}
+    </div>`
+        : ""
+    }
+
+    <div class="card">
+      <h2>💰 Total des droits à payer & base successorale globale</h2>
+      <div class="result">
+        <div class="line"><span>Assiette taxable des biens (après Dutreil)</span><b>${eur(d.patrimoineTaxable)}</b></div>
+        ${d.apres70Reintegre > 0 ? `<div class="line"><span>+ Assurance-vie après 70 ans réintégrée (art. 757 B)</span><b>+ ${eur(d.apres70Reintegre)}</b></div>` : ""}
+        <div class="line total"><span>📊 Base successorale globale</span><b>${eur(d.baseSuccessoraleGlobale)}</b></div>
+        <div class="line" style="margin-top:8px"><span>Droits de succession (sur base globale)</span><b style="color:var(--warn)">${eur(d.droitsSuccessionGlobaux)}</b></div>
+        <div class="line"><span>Droits assurance-vie avant 70 ans (990 I)</span><b style="color:var(--warn)">${eur(d.totalDroitsAV)}</b></div>
+        <div class="line total"><span>💸 TOTAL des droits à payer</span><b style="color:var(--danger);font-size:18px">${eur(d.totalDroitsTous)}</b></div>
+      </div>
     </div>
 
     ${
