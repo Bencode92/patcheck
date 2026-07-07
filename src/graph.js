@@ -1,7 +1,7 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=31";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=32";
 
 // Année de naissance : la DATE complète prime (plus précise), puis année seule, puis âge
 function birthYear(p) {
@@ -139,14 +139,15 @@ export function debrief(state) {
       if (age != null) usuAgeParActif[d.actifRef] = age;
     }
   });
-  // Repli quand aucune ligne "usufruit" n'est saisie : on prend le parent le plus âgé,
-  // mais à l'année du démembrement de l'actif (pas l'âge actuel).
+  // Repli quand aucune ligne "usufruit" n'est saisie : usufruit réservé par le couple
+  // -> barème 669 sur l'usufruitier LE PLUS JEUNE (l'usufruit dure jusqu'au dernier décès),
+  // à l'année du démembrement de l'actif (pas l'âge actuel).
   const usuAge = (actifId) => {
     if (usuAgeParActif[actifId] != null) return usuAgeParActif[actifId];
     const a = actif(actifId);
     const anneeRef = a && a.demembrementAnnee ? Number(a.demembrementAnnee) : undefined;
     const ages = parents.map((p) => ageDePers(p, anneeRef)).filter((x) => x != null);
-    return ages.length ? Math.max(...ages) : 65;
+    return ages.length ? Math.min(...ages) : 65;
   };
 
   // Valeur ÉCONOMIQUE d'une détention : PP = pleine ; US = %usufruit ; NP = %nue-propriété
