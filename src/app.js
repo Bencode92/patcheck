@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=46";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=46";
-import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=46";
-import * as sync from "./sync.js?v=46";
-import { askAI } from "./ai.js?v=46";
+} from "./data.js?v=47";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=47";
+import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=47";
+import * as sync from "./sync.js?v=47";
+import { askAI } from "./ai.js?v=47";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1111,6 +1111,20 @@ function renderAbattements() {
 // ---------- Onglet Simulateur ----------
 function renderSimulateur() {
   const c = $("#tab-content");
+  // Valeur par défaut = titres entreprise détenus en PP par les parents (les « 51 % conservés »)
+  const partPct = (v) => { if (typeof v === "string" && v.includes("/")) { const [x, y] = v.split("/").map(Number); return y ? x / y * 100 : 0; } return Number(v) || 0; };
+  const entRetenue = (state.detentions || []).filter((x) => {
+    const a = (state.actifs || []).find((z) => z.id === x.actifRef);
+    const p = state.personnes.find((z) => z.id === x.proprietaire);
+    return a && a.categorie === "entreprise" && x.droit === "PP" && p && p.role === "parent";
+  }).reduce((s, x) => {
+    const a = (state.actifs || []).find((z) => z.id === x.actifRef);
+    return s + (a.valeur || 0) * partPct(x.part) / 100;
+  }, 0);
+  const nEnfants = Math.max(1, state.personnes.filter((p) => p.role === "enfant").length);
+  const agesParents = state.personnes.filter((p) => p.role === "parent").map((p) => ageDe(p)).filter((x) => x != null);
+  const ageDon = agesParents.length ? Math.min(...agesParents) : 62;
+  const valDefaut = entRetenue > 0 ? Math.round(entRetenue) : 500000;
   c.innerHTML = `
     <div class="card">
       <h2>Simulateur de transmission</h2>
@@ -1139,6 +1153,19 @@ function renderSimulateur() {
       </div>
       <button id="s_go" class="btn primary">Calculer</button>
       <div id="s_result"></div>
+    </div>
+
+    <div class="card">
+      <h2>⚖️ Stratégie — transmettre les parts d'entreprise conservées</h2>
+      <p class="muted small">Compare 3 façons de transmettre les titres que les parents gardent encore en <b>pleine propriété</b> (les « 51 % »). Hypothèse : ${nEnfants} enfant(s), abattement 100 000 € par enfant, barème ligne directe. Indicatif — à valider avec le notaire.</p>
+      <div class="form-row">
+        <label>Valeur des titres à transmettre (€)<input type="text" id="st_val" value="${valDefaut}"></label>
+        <label>Nombre d'enfants<input type="number" id="st_n" min="1" max="12" value="${nEnfants}"></label>
+        <label>Âge du donateur<input type="number" id="st_age" min="30" max="100" value="${ageDon}"></label>
+      </div>
+      <label class="benef-chk" style="margin:2px 0 8px"><input type="checkbox" id="st_pacte" checked> Un pacte Dutreil couvre ces titres conservés (−75 % d'assiette au décès aussi)</label>
+      <button id="st_go" class="btn primary">Comparer les 3 voies</button>
+      <div id="st_result"></div>
     </div>`;
 
   // pré-remplir âge avec celui du donateur
@@ -1176,6 +1203,43 @@ function renderSimulateur() {
       <p class="muted small">Comparaison : en pleine propriété directe, transmettre ${eur(r.valeurPP)} coûterait ${eur(
         simulerTransmission({ montantPP: r.valeurPP, lien: $("#s_lien").value, mode: "pleine", donateurId: $("#s_don").value, beneficiaireId: $("#s_ben").value }).droits
       )} de droits. Le démembrement réduit l'assiette taxable à la seule nue-propriété.</p>`;
+  });
+
+  // --- Comparaison stratégique des 3 voies pour les titres conservés ---
+  $("#st_go").addEventListener("click", () => {
+    const num = (v) => Number(String(v).replace(/[^\d.-]/g, "")) || 0;
+    const V = num($("#st_val").value);
+    const n = Math.max(1, Number($("#st_n").value) || 1);
+    const age = Number($("#st_age").value) || 65;
+    const pacte = $("#st_pacte").checked;
+    const npFrac = 1 - tauxUsufruit(age); // fraction nue-propriété (art. 669)
+    // Droits totaux pour une assiette donnée, répartie entre n enfants (abattement 100 000 €/enfant), réduction art. 790 éventuelle
+    const droits = (assiette, reduction = 0) => {
+      const base = Math.max(0, assiette / n - ABATTEMENTS.enfant);
+      return calculDroits(base, BAREME_LIGNE_DIRECTE) * (1 - reduction) * n;
+    };
+    const moins70 = age < 70;
+    // Voie A : attendre le décès (Dutreil si pacte)
+    const assietteA = pacte ? V * 0.25 : V;
+    const dA = droits(assietteA);
+    // Voie B : donation en nue-propriété sous Dutreil (démembrement 669 × Dutreil), pas d'art. 790
+    const assietteB = V * npFrac * 0.25;
+    const dB = droits(assietteB);
+    // Voie C : donation en pleine propriété sous Dutreil avant 70 ans → assiette ×25 % PUIS droits ×50 % (art. 790)
+    const assietteC = V * 0.25;
+    const dC = moins70 ? droits(assietteC, 0.5) : droits(assietteC);
+    const best = Math.min(dA, dB, dC);
+    const eco = (x) => x <= best ? '<span class="badge ok">le moins coûteux</span>' : `<span class="muted small">+${eur(x - best)} vs meilleur</span>`;
+    $("#st_result").innerHTML = `
+      <div class="table-wrap" style="margin-top:12px"><table class="grid2">
+        <thead><tr><th>Voie</th><th>Assiette taxable</th><th>Droits estimés</th><th>Net transmis</th><th></th></tr></thead>
+        <tbody>
+          <tr><td><b>Attendre le décès</b><br><span class="muted small">${pacte ? "Dutreil −75 % (pacte)" : "sans pacte : valeur pleine"} · usufruit éteint sans droits</span></td><td class="num">${eur(assietteA)}</td><td class="num droits">${eur(dA)}</td><td class="num net">${eur(V - dA)}</td><td>${eco(dA)}</td></tr>
+          <tr><td><b>Donner la nue-propriété avant 70 ans</b><br><span class="muted small">Démembrement 669 (NP ${pct(npFrac)}) × Dutreil −75 % · le père garde l'usufruit/le contrôle</span></td><td class="num">${eur(assietteB)}</td><td class="num droits">${eur(dB)}</td><td class="num net">${eur(V - dB)}</td><td>${eco(dB)}</td></tr>
+          <tr><td><b>Donner la pleine propriété avant 70 ans</b><br><span class="muted small">Dutreil −75 %${moins70 ? " PUIS droits −50 % (art. 790)" : " — art. 790 indisponible (≥ 70 ans)"} · le père perd le contrôle capitalistique</span></td><td class="num">${eur(assietteC)}</td><td class="num droits">${eur(dC)}</td><td class="num net">${eur(V - dC)}</td><td>${eco(dC)}</td></tr>
+        </tbody>
+      </table></div>
+      <p class="muted small" style="margin-top:8px">💡 Le cumul <b>démembrement × Dutreil</b> ne taxe que ${pct(npFrac * 0.25)} de la valeur (voie NP). La voie PP avant 70 ans ajoute la réduction de droits de 50 % (art. 790) — la plus puissante, mais le donateur perd le contrôle. À arbitrer avec le notaire (gouvernance + engagements de conservation 4 ans / direction 3 ans).</p>`;
   });
 }
 
