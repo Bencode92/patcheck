@@ -618,9 +618,11 @@ button.chip:hover { border-color: var(--accent); color: var(--accent); }
   overflow: auto;
   text-align: center;
   min-height: 120px;
+  max-height: 75vh;
   box-shadow: inset 0 1px 3px rgba(16, 35, 63, 0.03);
 }
-.mermaid-box svg { max-width: 100%; height: auto; }
+/* SVG à sa taille NATIVE (lisible) : le conteneur scrolle au lieu d'écraser le schéma */
+.mermaid-box svg { max-width: none !important; height: auto; }
 
 pre.code {
   text-align: left;

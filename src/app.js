@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=47";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=47";
-import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=47";
-import * as sync from "./sync.js?v=47";
-import { askAI } from "./ai.js?v=47";
+} from "./data.js?v=48";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=48";
+import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=48";
+import * as sync from "./sync.js?v=48";
+import { askAI } from "./ai.js?v=48";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -446,26 +446,47 @@ async function renderOrganigramme() {
     if (av > 0) m.av = av;
     return m;
   };
-  let mirror = "";
+  let mirror = "", mirrorData = null;
   if (parents.length === 2) {
     const [pa, pb] = parents;
     const ma = parentCat(pa), mb = parentCat(pb);
     const keys = MIRORDER.filter((k) => (ma[k] || 0) > 0 || (mb[k] || 0) > 0);
-    const maxV = Math.max(1, ...keys.flatMap((k) => [ma[k] || 0, mb[k] || 0]));
-    const totA = Object.values(ma).reduce((s, v) => s + v, 0), totB = Object.values(mb).reduce((s, v) => s + v, 0);
+    mirrorData = { pa, pb, ma, mb, keys };
+  }
+  // Corps du miroir recalculé selon les catégories visibles (mirrorHidden)
+  const mirrorBody = () => {
+    const { pa, pb, ma, mb, keys } = mirrorData;
+    const vis = keys.filter((k) => !mirrorHidden.has(k));
+    const maxV = Math.max(1, ...vis.flatMap((k) => [ma[k] || 0, mb[k] || 0]));
+    const totA = vis.reduce((s, k) => s + (ma[k] || 0), 0), totB = vis.reduce((s, k) => s + (mb[k] || 0), 0);
+    return `<div class="mirror-head"><div class="l">${pa.nom}</div><div class="c">Catégorie</div><div>${pb.nom}</div></div>
+      ${vis.map((k) => `<div class="mirror-row">
+        <div class="mbar l"><span class="amt num">${eur(ma[k] || 0)}</span><span class="track"><span class="fill" style="width:${Math.round((ma[k] || 0) / maxV * 100)}%"></span></span></div>
+        <div class="mirror-cat">${MIRLBL[k] || k}</div>
+        <div class="mbar r"><span class="track"><span class="fill" style="width:${Math.round((mb[k] || 0) / maxV * 100)}%"></span></span><span class="amt num">${eur(mb[k] || 0)}</span></div>
+      </div>`).join("") || '<div class="muted small center" style="padding:10px">Toutes les catégories sont masquées.</div>'}
+      <div class="mirror-row mirror-total"><div class="mbar l"><span class="amt num">${eur(totA)}</span></div><div class="mirror-cat">Total affiché</div><div class="mbar r"><span class="amt num">${eur(totB)}</span></div></div>`;
+  };
+  const mirrorEq = () => {
+    const { pa, pb, ma, mb, keys } = mirrorData;
+    const vis = keys.filter((k) => !mirrorHidden.has(k));
+    const totA = vis.reduce((s, k) => s + (ma[k] || 0), 0), totB = vis.reduce((s, k) => s + (mb[k] || 0), 0);
+    const ecart = Math.abs(totA - totB), totMax = Math.max(totA, totB, 1), ratio = ecart / totMax;
+    if (totA === 0 && totB === 0) return "";
+    if (ratio < 0.05) return `<span class="badge ok">Équilibré</span> écart de ${eur(ecart)} entre les deux parents sur les catégories affichées.`;
+    const plus = totA > totB ? pa.nom : pb.nom;
+    return `<span class="badge warn">Déséquilibre ${Math.round(ratio * 100)} %</span> ${plus} détient <b>${eur(ecart)}</b> de plus (catégories affichées) — utile pour équilibrer une donation.`;
+  };
+  if (mirrorData) {
+    const { pa, pb, keys } = mirrorData;
     const ageA = ageDe(pa), ageB = ageDe(pb);
     mirror = `<div class="card">
-      <div class="section-head"><div><h2>Répartition par catégorie et par parent</h2><div class="small muted">SCI regroupée avec l'immobilier ; assurance-vie ajoutée comme classe. Barres proportionnelles au plus gros poste.</div></div>
+      <div class="section-head"><div><h2>Répartition par catégorie et par parent</h2><div class="small muted">SCI regroupée avec l'immobilier ; assurance-vie ajoutée comme classe. Décoche une catégorie pour l'exclure (ex. retirer l'entreprise pour voir l'équilibre hors pro et simuler une donation).</div></div>
         <div class="legend"><span><span class="dot" style="background:var(--accent)"></span>${pa.nom}${ageA != null ? ` (${ageA} ans)` : ""}</span><span><span class="dot" style="background:#6ea0e8"></span>${pb.nom}${ageB != null ? ` (${ageB} ans)` : ""}</span></div></div>
-      <div class="mirror">
-        <div class="mirror-head"><div class="l">${pa.nom}</div><div class="c">Catégorie</div><div>${pb.nom}</div></div>
-        ${keys.map((k) => `<div class="mirror-row">
-          <div class="mbar l"><span class="amt num">${eur(ma[k] || 0)}</span><span class="track"><span class="fill" style="width:${Math.round((ma[k] || 0) / maxV * 100)}%"></span></span></div>
-          <div class="mirror-cat">${MIRLBL[k] || k}</div>
-          <div class="mbar r"><span class="track"><span class="fill" style="width:${Math.round((mb[k] || 0) / maxV * 100)}%"></span></span><span class="amt num">${eur(mb[k] || 0)}</span></div>
-        </div>`).join("")}
-        <div class="mirror-row mirror-total"><div class="mbar l"><span class="amt num">${eur(totA)}</span></div><div class="mirror-cat">Total</div><div class="mbar r"><span class="amt num">${eur(totB)}</span></div></div>
-      </div></div>`;
+      <div class="chips" style="margin:2px 0 12px">${keys.map((k) => `<label class="benef-chk"><input type="checkbox" class="mir-cat" data-k="${k}" ${mirrorHidden.has(k) ? "" : "checked"}> ${MIRLBL[k] || k}</label>`).join("")}</div>
+      <div class="mirror" id="mirror-body">${mirrorBody()}</div>
+      <div id="mirror-eq" class="small" style="margin-top:10px">${mirrorEq()}</div>
+    </div>`;
   }
 
   // ---- ③ Diptyque décès ----
@@ -625,7 +646,7 @@ async function renderOrganigramme() {
         <button id="dl_svg" class="btn ghost">⬇ Exporter l'image (SVG)</button>
       </div>
       <div id="mermaid-box" class="mermaid-box"><div class="muted">Génération du schéma…</div></div>
-      <p class="muted small">Traits pleins = pleine propriété · pointillés = démembrement (US/NP) · flèches épaisses = donations réalisées.</p>
+      <p class="muted small">Traits pleins = pleine propriété · pointillés = démembrement (US/NP) · flèches épaisses = donations réalisées. 🔍 Schéma à taille réelle : <b>fais défiler</b> dans le cadre pour l'explorer, ou exporte le SVG.</p>
     </div>`;
 
   // Interactions
@@ -637,12 +658,22 @@ async function renderOrganigramme() {
     tgl.textContent = open ? "Tout replier" : "Tout déplier";
   });
 
+  // Miroir : filtrer les catégories (recalcul live des barres + équilibre)
+  if (mirrorData) {
+    const applyMirror = () => { $("#mirror-body").innerHTML = mirrorBody(); $("#mirror-eq").innerHTML = mirrorEq(); };
+    $$("#tab-content .mir-cat").forEach((el) => el.addEventListener("change", (e2) => {
+      const k = e2.target.dataset.k;
+      e2.target.checked ? mirrorHidden.delete(k) : mirrorHidden.add(k);
+      applyMirror();
+    }));
+  }
+
   // Rendu Mermaid (import dynamique depuis CDN)
   const box = $("#mermaid-box");
   const def = buildMermaid(state);
   try {
     const mermaid = (await import("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs")).default;
-    mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "loose", flowchart: { curve: "basis" } });
+    mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "loose", flowchart: { curve: "basis", nodeSpacing: 45, rankSpacing: 60, useMaxWidth: false, padding: 12 } });
     const { svg } = await mermaid.render("orgchart", def);
     box.innerHTML = svg;
     $("#dl_svg").addEventListener("click", () => download("organigramme-patrimoine.svg", box.innerHTML, "image/svg+xml"));
@@ -756,6 +787,7 @@ const ownerList = () => [
 const actifList = () => (state.actifs || []).map((a) => [a.id, (a.libelle || a.id)]);
 const CAT_LOOKUP = Object.fromEntries(CATEGORIES);
 const collapsedCats = new Set(); // catégories repliées (état d'affichage, non sauvegardé)
+const mirrorHidden = new Set(); // catégories exclues du miroir par parent (test d'équilibre)
 
 const ETABLISSEMENTS = ["Generali", "Société Générale", "BNP Paribas", "Aviva", "Trading 212", "AXA", "Natixis", "Coinbase", "Allianz"];
 const datalistEtabs = () => `<datalist id="etabs">${ETABLISSEMENTS.map((e) => `<option value="${e}">`).join("")}</datalist>`;
