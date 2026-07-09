@@ -1,7 +1,7 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=44";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=45";
 
 // Année de naissance : la DATE complète prime (plus précise), puis année seule, puis âge
 function birthYear(p) {
@@ -255,32 +255,41 @@ export function debrief(state) {
   // Hypothèse simple : patrimoine réparti également entre les enfants, chaque
   // enfant bénéficiant d'un abattement de 100 000 € par parent (art. 779),
   // diminué des donations déjà consenties dans les 15 ans (rappel fiscal).
-  // Exonération Dutreil : 75 % de la valeur des titres d'entreprise éligibles
-  // détenus par des personnes physiques sortent de la base taxable.
-  let exonerationDutreil = 0;
-  let dutreilAssiette = 0; // valeur du capital entreprise éligible (avant exonération)
-  detentions.forEach((d) => {
-    if (!estPersonne(d.proprietaire)) return;
-    const a = actif(d.actifRef);
-    if (a && a.categorie === "entreprise" && a.dutreil) {
-      const v = (actifNet(d.actifRef) * d.part) / 100;
-      dutreilAssiette += v;
-      exonerationDutreil += DUTREIL_EXO * v;
-    }
-  });
-  const patrimoineTaxable = Math.max(0, patrimoineFoyer - exonerationDutreil);
-
-  // Composition de la base taxable par catégorie (entreprise éligible réduite du −75 % Dutreil).
-  // Permet de « développer » la masse transmise dans le Résumé.
+  // ---- Assiette TRANSMISE au décès des parents ----
+  // Seuls les biens des PARENTS se transmettent, et uniquement en pleine ou nue-propriété :
+  //  - l'USUFRUIT d'un parent s'éteint SANS droits au décès (art. 1133 CGI) -> exclu ;
+  //  - les biens détenus par les ENFANTS (nue-propriété déjà donnée) ne se transmettent
+  //    pas au décès des parents (ils sont déjà à eux) -> exclus ;
+  //  - Dutreil (−75 %) ne s'applique ici qu'aux parts entreprise SOUS PACTE encore
+  //    détenues par les parents (l'exonération de la donation passée est un autre événement).
+  let exonerationDutreil = 0;    // −75 % sur les parts entreprise détenues par les parents (pacte)
+  let dutreilAssiette = 0;       // valeur des parts entreprise détenues éligibles (avant −75 %)
+  const masseTransmiseParPar = {};
   const taxableParCategorie = {};
+  parents.forEach((p) => (masseTransmiseParPar[p.id] = 0));
   detentions.forEach((d) => {
-    if (!estPersonne(d.proprietaire)) return;
+    const p = personnes.find((x) => x.id === d.proprietaire);
+    if (!p || p.role !== "parent") return; // seuls les biens des parents se transmettent
+    if (d.droit === "US") return;          // usufruit : extinction franche de droits (art. 1133)
     const a = actif(d.actifRef);
     if (!a) return;
-    let v = valeurEconomique(d);
-    if (a.categorie === "entreprise" && a.dutreil) v *= (1 - DUTREIL_EXO); // 25 % restant taxable
+    let v = valeurEconomique(d);           // PP = pleine valeur ; NP = fraction nue-propriété
+    if (a.categorie === "entreprise" && a.dutreil) {
+      dutreilAssiette += v;
+      const exo = DUTREIL_EXO * v;
+      exonerationDutreil += exo;
+      v -= exo;                            // ne reste que les 25 % taxables
+    }
+    masseTransmiseParPar[d.proprietaire] += v;
     taxableParCategorie[a.categorie] = (taxableParCategorie[a.categorie] || 0) + v;
   });
+  // Dettes personnelles d'un parent réduisent sa masse transmissible
+  Object.entries(detteParPersonne).forEach(([pid, m]) => {
+    const p = personnes.find((x) => x.id === pid);
+    if (p && p.role === "parent" && masseTransmiseParPar[pid] !== undefined)
+      masseTransmiseParPar[pid] = Math.max(0, masseTransmiseParPar[pid] - m);
+  });
+  const patrimoineTaxable = Math.max(0, Object.values(masseTransmiseParPar).reduce((s, v) => s + v, 0));
   if (apres70Reintegre > 0) taxableParCategorie.av_apres70 = apres70Reintegre;
 
   let droitsSuccessionEstimes = 0;
@@ -391,6 +400,7 @@ export function debrief(state) {
     exonerationDutreil,
     dutreilAssiette,
     taxableParCategorie,
+    masseTransmiseParPar,
     totalDettes,
     regime: state.regime || "",
     parPersonneDetail,
@@ -435,26 +445,27 @@ export function simulerDeces(state, defuntId) {
   const conjoint = parents.find((p) => p.id !== defuntId) || null;
   const patrimoineTaxable = D.patrimoineTaxable;
   const patrimoineFoyer = D.patrimoineFoyer;
-  const shareOf = (pid) => (patrimoineFoyer > 0 ? Math.max(0, D.parPersonne[pid] || 0) / patrimoineFoyer : 0);
+  const masseDe = (pid) => (D.masseTransmiseParPar && D.masseTransmiseParPar[pid]) || 0;
   const regime = state.regime || "";
+  const demembreNote = " L'usufruit des parents s'éteint sans droits (art. 1133) et la nue-propriété déjà donnée aux enfants n'est pas re-taxée.";
 
-  // Masse taxable des BIENS attribuée à chaque décès + hypothèse retenue
+  // Masse taxable des BIENS (transmise par les parents) attribuée à chaque décès + hypothèse retenue
   let attribution = false, masseBiens1, masseBiens2, hypothese;
   if (!conjoint) {
     masseBiens1 = patrimoineTaxable; masseBiens2 = 0;
-    hypothese = "Parent seul : transmission directe aux enfants (2 abattements non applicables).";
+    hypothese = "Parent seul : transmission directe aux enfants (2 abattements non applicables)." + demembreNote;
   } else if (regime === "universelle_attribution") {
     attribution = true; masseBiens1 = 0; masseBiens2 = patrimoineTaxable;
-    hypothese = "Communauté universelle + attribution intégrale : au 1er décès tout revient au conjoint sans droits ; les enfants ne sont taxés qu'au 2d décès, avec un SEUL abattement de 100 000 € par enfant (celui du 1er parent est perdu).";
+    hypothese = "Communauté universelle + attribution intégrale : au 1er décès tout revient au conjoint sans droits ; les enfants ne sont taxés qu'au 2d décès, avec un SEUL abattement de 100 000 € par enfant (celui du 1er parent est perdu)." + demembreNote;
   } else if (regime === "universelle") {
     masseBiens1 = patrimoineTaxable * 0.5; masseBiens2 = patrimoineTaxable * 0.5;
-    hypothese = "Communauté universelle : masse partagée 50/50, les enfants héritent en pleine propriété de la part du défunt à chaque décès (hypothèse v1).";
+    hypothese = "Communauté universelle : masse partagée 50/50, les enfants héritent en pleine propriété de la part du défunt à chaque décès (hypothèse v1)." + demembreNote;
   } else if (regime === "acquets") {
-    masseBiens1 = patrimoineTaxable * shareOf(defuntId); masseBiens2 = patrimoineTaxable * shareOf(conjoint.id);
-    hypothese = "Communauté réduite aux acquêts (v1) : part de chacun estimée d'après sa détention dans l'app, enfants héritant en pleine propriété. Hypothèse simplifiée — l'usufruit légal du conjoint n'est pas modélisé.";
+    masseBiens1 = masseDe(defuntId); masseBiens2 = masseDe(conjoint.id);
+    hypothese = "Communauté réduite aux acquêts (v1) : masse transmise par chaque parent = ses biens détenus (hors usufruit), enfants héritant en pleine propriété. Hypothèse simplifiée — l'usufruit légal du conjoint n'est pas modélisé." + demembreNote;
   } else {
-    masseBiens1 = patrimoineTaxable * shareOf(defuntId); masseBiens2 = patrimoineTaxable * shareOf(conjoint.id);
-    hypothese = "Estimation non différenciée par régime (v1) : part de chacun estimée d'après sa détention dans l'app.";
+    masseBiens1 = masseDe(defuntId); masseBiens2 = masseDe(conjoint.id);
+    hypothese = "Estimation non différenciée par régime (v1) : masse transmise par chaque parent = ses biens détenus (hors usufruit)." + demembreNote;
   }
 
   // Droits ligne directe des enfants sur une masse (abattement du parent concerné, rapport donations <15 ans)

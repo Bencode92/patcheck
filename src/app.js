@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=44";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=44";
-import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=44";
-import * as sync from "./sync.js?v=44";
-import { askAI } from "./ai.js?v=44";
+} from "./data.js?v=45";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=45";
+import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=45";
+import * as sync from "./sync.js?v=45";
+import { askAI } from "./ai.js?v=45";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
