@@ -1,7 +1,7 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=43";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=44";
 
 // Année de naissance : la DATE complète prime (plus précise), puis année seule, puis âge
 function birthYear(p) {
@@ -270,6 +270,19 @@ export function debrief(state) {
   });
   const patrimoineTaxable = Math.max(0, patrimoineFoyer - exonerationDutreil);
 
+  // Composition de la base taxable par catégorie (entreprise éligible réduite du −75 % Dutreil).
+  // Permet de « développer » la masse transmise dans le Résumé.
+  const taxableParCategorie = {};
+  detentions.forEach((d) => {
+    if (!estPersonne(d.proprietaire)) return;
+    const a = actif(d.actifRef);
+    if (!a) return;
+    let v = valeurEconomique(d);
+    if (a.categorie === "entreprise" && a.dutreil) v *= (1 - DUTREIL_EXO); // 25 % restant taxable
+    taxableParCategorie[a.categorie] = (taxableParCategorie[a.categorie] || 0) + v;
+  });
+  if (apres70Reintegre > 0) taxableParCategorie.av_apres70 = apres70Reintegre;
+
   let droitsSuccessionEstimes = 0;
   const successionParEnfant = [];
   const partParEnfant = enfants.length ? patrimoineFoyer / enfants.length : 0;          // économique (reçu)
@@ -377,6 +390,7 @@ export function debrief(state) {
     patrimoineTaxable,
     exonerationDutreil,
     dutreilAssiette,
+    taxableParCategorie,
     totalDettes,
     regime: state.regime || "",
     parPersonneDetail,
