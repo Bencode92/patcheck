@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=45";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=45";
-import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=45";
-import * as sync from "./sync.js?v=45";
-import { askAI } from "./ai.js?v=45";
+} from "./data.js?v=46";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=46";
+import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=46";
+import * as sync from "./sync.js?v=46";
+import { askAI } from "./ai.js?v=46";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1373,6 +1373,17 @@ function renderEntreprise() {
         <div class="line total"><span>Assiette taxable en transmission</span><b>${eur(valeur * 0.25)}</b></div>` : `<div class="line"><span class="muted small">Sans pacte Dutreil : assiette taxable = valeur pleine.</span></div>`}
         ${tUS != null ? `<div class="line"><span>Démembrement — usufruitier ${usPers.nom} (${age} ans${a.demembrementAnnee ? " en " + a.demembrementAnnee : ", âge actuel"}) → usufruit ${pct(tUS)} / NP ${pct(1 - tUS)}</span><b>NP transmise : ${eur(npVal)}</b></div>` : ""}
         ${a.dutreil && npVal != null ? `<div class="line total"><span>💡 Donation de la nue-propriété sous Dutreil → base taxable</span><b>${eur(npVal)} × 25 % = ${eur(npVal * 0.25)}</b></div>` : ""}
+        ${a.dutreil ? (() => {
+          const pp = (v) => { if (typeof v === "string" && v.includes("/")) { const [x, y] = v.split("/").map(Number); return y ? x / y * 100 : 0; } return Number(v) || 0; };
+          const role = (id) => state.personnes.find((p) => p.id === id)?.role;
+          const npEnf = dets.filter(({ d }) => d.droit === "NP" && role(d.proprietaire) === "enfant").reduce((s, { d }) => s + pp(d.part), 0);
+          const ppPar = dets.filter(({ d }) => d.droit === "PP" && role(d.proprietaire) === "parent").reduce((s, { d }) => s + pp(d.part), 0);
+          if (!npEnf && !ppPar) return "";
+          return `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+            ${npEnf > 0 ? `<span class="badge ok" title="Le Dutreil a été consommé lors de la donation de la nue-propriété (événement passé).">Titres donnés (NP ${Math.round(npEnf)} %) ✓ Dutreil déjà utilisé à la donation</span>` : ""}
+            ${ppPar > 0 ? `<span class="badge warn" title="Le pacte Dutreil couvre-t-il aussi les titres conservés en pleine propriété ? À vérifier dans l'acte : pacte en cours, engagement réputé acquis (34 % droits de vote + direction >2 ans), ou pacte post-mortem sous 6 mois.">Titres conservés (PP ${Math.round(ppPar)} %) — le pacte couvre-t-il ces titres ? à confirmer</span>` : ""}
+          </div>`;
+        })() : ""}
       </div>
     </div>`;
   };
