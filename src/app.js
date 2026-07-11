@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=48";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=48";
-import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=48";
-import * as sync from "./sync.js?v=48";
-import { askAI } from "./ai.js?v=48";
+} from "./data.js?v=49";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=49";
+import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=49";
+import * as sync from "./sync.js?v=49";
+import { askAI } from "./ai.js?v=49";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -459,13 +459,13 @@ async function renderOrganigramme() {
     const vis = keys.filter((k) => !mirrorHidden.has(k));
     const maxV = Math.max(1, ...vis.flatMap((k) => [ma[k] || 0, mb[k] || 0]));
     const totA = vis.reduce((s, k) => s + (ma[k] || 0), 0), totB = vis.reduce((s, k) => s + (mb[k] || 0), 0);
-    return `<div class="mirror-head"><div class="l">${pa.nom}</div><div class="c">Catégorie</div><div>${pb.nom}</div></div>
+    return `<div class="mirror-head"><div class="l">${pa.nom}</div><div class="c">Catégorie · total</div><div>${pb.nom}</div></div>
       ${vis.map((k) => `<div class="mirror-row">
         <div class="mbar l"><span class="amt num">${eur(ma[k] || 0)}</span><span class="track"><span class="fill" style="width:${Math.round((ma[k] || 0) / maxV * 100)}%"></span></span></div>
-        <div class="mirror-cat">${MIRLBL[k] || k}</div>
+        <div style="text-align:center"><div class="mirror-cat">${MIRLBL[k] || k}</div><div class="num" style="font-weight:700;font-size:12.5px;margin-top:3px">${eur((ma[k] || 0) + (mb[k] || 0))}</div></div>
         <div class="mbar r"><span class="track"><span class="fill" style="width:${Math.round((mb[k] || 0) / maxV * 100)}%"></span></span><span class="amt num">${eur(mb[k] || 0)}</span></div>
       </div>`).join("") || '<div class="muted small center" style="padding:10px">Toutes les catégories sont masquées.</div>'}
-      <div class="mirror-row mirror-total"><div class="mbar l"><span class="amt num">${eur(totA)}</span></div><div class="mirror-cat">Total affiché</div><div class="mbar r"><span class="amt num">${eur(totB)}</span></div></div>`;
+      <div class="mirror-row mirror-total"><div class="mbar l"><span class="amt num">${eur(totA)}</span></div><div style="text-align:center"><div class="mirror-cat">Total affiché</div><div class="num" style="font-weight:700;font-size:13px;margin-top:3px">${eur(totA + totB)}</div></div><div class="mbar r"><span class="amt num">${eur(totB)}</span></div></div>`;
   };
   const mirrorEq = () => {
     const { pa, pb, ma, mb, keys } = mirrorData;
