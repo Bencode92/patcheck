@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=49";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=49";
-import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=49";
-import * as sync from "./sync.js?v=49";
-import { askAI } from "./ai.js?v=49";
+} from "./data.js?v=50";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=50";
+import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=50";
+import * as sync from "./sync.js?v=50";
+import { askAI } from "./ai.js?v=50";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1030,8 +1030,8 @@ function renderDonations() {
                     <td>${eur(parseNum(d.montant))}</td>
                     <td>${
                       actif
-                        ? `<span class="badge warn">rapportable — ${restant.toFixed(1)} an(s) restants</span>`
-                        : `<span class="badge ok">purgée (&gt;${DELAI_RAPPEL_ANS} ans)</span>`
+                        ? `<span class="badge warn">rapportable — ${restant.toFixed(1)} an(s) restants</span><div class="muted small">se purge le <b>${purgeDate(d.date)}</b> → +${eur(parseNum(d.montant))} d'abattement libéré</div>`
+                        : `<span class="badge ok">purgée depuis ${purgeDate(d.date)}</span>`
                     }</td>
                     <td><button class="del danger-link">✕</button></td>
                   </tr>`;
@@ -1093,6 +1093,14 @@ function renderDonations() {
 function natureLabel(n) {
   return { pleine: "Pleine propriété", nue_propriete: "Nue-propriété", somme_argent: "Somme d'argent (790 G)", usufruit: "Usufruit" }[n] || n;
 }
+// Date de purge d'une donation = date + 15 ans (l'abattement se recharge alors)
+function purgeDate(dateStr) {
+  if (!dateStr) return "—";
+  const dd = new Date(dateStr);
+  if (isNaN(dd)) return "—";
+  dd.setFullYear(dd.getFullYear() + DELAI_RAPPEL_ANS);
+  return dd.toLocaleDateString("fr-FR");
+}
 function selectPersonnes(id, list, selected) {
   return `<select id="${id}">${list
     .map((p) => `<option value="${p.id}" ${p.id === selected ? "selected" : ""}>${p.nom}</option>`)
@@ -1110,9 +1118,15 @@ function renderAbattements() {
           const plafond = ABATTEMENTS.enfant;
           const restant = Math.max(0, plafond - total);
           const ratio = Math.min(1, total / plafond);
+          // Prochaine recharge = la donation < 15 ans la plus ancienne (elle se purge en premier)
+          const dons = state.donations
+            .filter((d) => d.donateurId === par.id && d.beneficiaireId === enf.id && anneesEcoulees(d.date) < DELAI_RAPPEL_ANS)
+            .sort((a, b) => (a.date < b.date ? -1 : 1));
+          const next = dons[0];
           return `<td>
             <div class="gauge"><div class="gauge-fill" style="width:${ratio * 100}%"></div></div>
             <div class="gauge-lbl"><b>${eur(restant)}</b> dispo.<br><span class="muted">${eur(total)} / ${eur(plafond)} consommé</span></div>
+            ${next ? `<div class="muted small" style="margin-top:4px">↩︎ prochaine recharge <b>+${eur(parseNum(next.montant))}</b> le <b>${purgeDate(next.date)}</b></div>` : ""}
           </td>`;
         })
         .join("");
@@ -1130,7 +1144,12 @@ function renderAbattements() {
   c.innerHTML = `
     <div class="card">
       <h2>Abattements encore disponibles</h2>
-      <p class="muted">Abattement de ${eur(ABATTEMENTS.enfant)} par parent et par enfant, rechargé tous les ${DELAI_RAPPEL_ANS} ans. Ci-dessous ce qu'il reste à transmettre <b>en franchise de droits</b>.</p>
+      <div class="hint ok" style="margin-bottom:12px">
+        <b>Un seul abattement de ${eur(ABATTEMENTS.enfant)}</b> par parent et par enfant, <b>partagé entre les donations ET la succession</b> (ce n'est pas ${eur(ABATTEMENTS.enfant)} pour donner + ${eur(ABATTEMENTS.enfant)} au décès).
+        Il se <b>recharge tous les ${DELAI_RAPPEL_ANS} ans</b> : chaque donation « sort du compteur » à sa date + ${DELAI_RAPPEL_ANS} ans, et libère alors son montant.
+        <br>💡 Donner tôt puis vivre ${DELAI_RAPPEL_ANS} ans = utiliser l'abattement <b>deux fois</b> (une fois maintenant, une fois au décès).
+      </div>
+      <p class="muted small">Ci-dessous, par couple parent → enfant : ce qu'il reste à transmettre <b>en franchise de droits</b>, et la prochaine date de recharge.</p>
       <div class="kpi"><span>Capacité totale de donation exonérée immédiate</span><b>${eur(totalDispo)}</b></div>
       <table class="grid matrix">
         <thead><tr><th></th>${parents().map((p) => `<th>${p.nom}</th>`).join("")}</tr></thead>
