@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=53";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=53";
-import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=53";
-import * as sync from "./sync.js?v=53";
-import { askAI } from "./ai.js?v=53";
+} from "./data.js?v=54";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=54";
+import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=54";
+import * as sync from "./sync.js?v=54";
+import { askAI } from "./ai.js?v=54";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -265,22 +265,51 @@ function exporterResume() {
     push("Transmission à chaque décès (2 abattements)", euro(d.scenarios.progressif.total));
     push("Décès simultané (référence)", euro(d.scenarios.simultane.total));
   }
+  // Biens & actifs (avec dette adossée et valeur nette)
+  const detteActif = {};
+  (state.dettes || []).forEach((x) => { detteActif[x.cible] = (detteActif[x.cible] || 0) + x.montant; });
+  const nameOf = (id) => personne(id)?.nom || (state.actifs || []).find((a) => a.id === id)?.libelle || id;
   push("");
-  push("ASSURANCE-VIE", "Banque", "Souscripteur(s)", "Capital", "Régime primes", "Bénéficiaires");
+  push("BIENS & ACTIFS", "Catégorie", "Valeur", "Pacte Dutreil", "Dette adossée", "Valeur nette");
+  (state.actifs || []).forEach((a) => {
+    const det = detteActif[a.id] || 0;
+    push(a.libelle, (CAT_LOOKUP[a.categorie] || a.categorie), euro(a.valeur), a.dutreil ? "oui (−75%)" : "", det ? euro(det) : "", euro((a.valeur || 0) - det));
+  });
+  // Répartition détaillée : qui détient quoi
+  const DROIT_TXT = { PP: "Pleine propriété", US: "Usufruit", NP: "Nue-propriété" };
+  push("");
+  push("QUI DÉTIENT QUOI (répartition)", "Bien / actif", "Quote-part", "Droit", "Valeur détenue");
+  state.personnes.forEach((p) => {
+    (d.parPersonneDetail[p.id] || []).forEach((it) => {
+      const droit = (DROIT_TXT[it.droit] || it.droit) + (it.droit !== "PP" ? ` (${Math.round(it.fraction * 100)}% — 669)` : "");
+      push(p.nom, it.libelle, it.part + " %", droit, euro(it.valeur));
+    });
+  });
+  // Endettement
+  if ((state.dettes || []).length) {
+    push("");
+    push("DETTES / ENDETTEMENT", "Montant dû", "Adossé à");
+    (state.dettes || []).forEach((x) => push(x.libelle || "Emprunt", euro(x.montant), nameOf(x.cible)));
+    push("TOTAL DETTES", euro(d.totalDettes), "");
+  }
+  push("");
+  push("ASSURANCE-VIE / PER", "Établissement", "Souscripteur(s)", "Capital", "Régime", "Clause bénéficiaire", "Bénéficiaires + répartition");
   (state.av || []).forEach((a) => {
     const bens = (a.beneficiaires || []).map((b) => { const nom = personne(b)?.nom || b; const pc = a.repartition?.[b]; return pc ? `${nom} ${pc}%` : nom; }).join(" / ");
     const sous = (personne(a.souscripteurId)?.nom || "") + (a.cosouscripteurId ? " & " + (personne(a.cosouscripteurId)?.nom || "") : "");
-    push(a.libelle || a.id, a.etablissement || "", sous, euro(a.montant), a.avant70 ? "avant 70 ans" : "après 70 ans", bens);
+    const clause = a.clauseType === "conjoint_defaut_enfants" ? "Conjoint, à défaut les enfants" : "Bénéficiaires désignés";
+    const regime = a.per ? "PER — selon l'âge au décès" : (a.avant70 ? "primes avant 70 ans (990 I)" : "primes après 70 ans (757 B)");
+    push((a.libelle || "") + (a.per ? " [PER]" : ""), a.etablissement || "", sous, euro(a.montant), regime, clause, bens);
   });
   push("");
-  push("DONATIONS RÉALISÉES", "Date", "Donateur", "Bénéficiaire", "Montant", "Statut");
+  push("DONATIONS RÉALISÉES", "Date", "Donateur", "Bénéficiaire", "Montant", "Statut rappel 15 ans");
   state.donations.forEach((x) => {
     const purge = anneesEcoulees(x.date) >= DELAI_RAPPEL_ANS;
-    push("", x.date, personne(x.donateurId)?.nom || "", personne(x.beneficiaireId)?.nom || "", euro(x.montant), purge ? "purgée (>15 ans)" : "rapportable");
+    push("", x.date, personne(x.donateurId)?.nom || "", personne(x.beneficiaireId)?.nom || "", euro(x.montant), purge ? "purgée (>15 ans)" : "rapportable (<15 ans)");
   });
 
   const esc = (s) => { s = String(s ?? ""); return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-  download("resume-patrimonial.csv", rows.map((r) => r.map(esc).join(",")).join("\n"));
+  download("patrimoine-pour-banquier.csv", rows.map((r) => r.map(esc).join(";")).join("\n"));
 }
 
 // ---------- Onglet Données (CSV) ----------
@@ -297,10 +326,12 @@ function renderDonnees() {
       <h2>Import / export CSV</h2>
       <p class="muted">Remplis un tableur avec tes vraies données, exporte en CSV, puis importe-le ici. L'organigramme et le débrief se génèrent automatiquement. Tu peux aussi ré-exporter à tout moment le CSV consolidé pour l'envoyer à un tiers.</p>
       <div class="form-row" style="align-items:center">
-        <button id="dl_template" class="btn primary">⬇ Télécharger le modèle CSV</button>
-        <button id="dl_export" class="btn">⬇ Exporter mes données (CSV)</button>
+        <button id="dl_banquier" class="btn primary">📄 Export lisible (banquier / notaire)</button>
+        <button id="dl_export" class="btn">⬇ Export technique (sauvegarde / ré-import)</button>
+        <button id="dl_template" class="btn ghost">Modèle CSV</button>
         <label class="btn ghost">⬆ Importer un CSV<input id="csv_in" type="file" accept=".csv,text/csv" hidden></label>
       </div>
+      <p class="muted small">📄 <b>Export banquier</b> : document de synthèse <b>sans codes techniques</b> — biens, qui détient quoi, endettement, clauses AV, donations. À envoyer à ton conseiller. · ⬇ <b>Export technique</b> : fichier complet avec identifiants, pour <b>ré-importer</b> ou sauvegarder.</p>
       <div id="csv_msg"></div>
     </div>
 
@@ -331,6 +362,7 @@ function renderDonnees() {
 
   $("#dl_template").addEventListener("click", () => download("modele-patrimoine.csv", templateCSV()));
   $("#dl_export").addEventListener("click", () => download("mes-donnees-patrimoine.csv", stateToCSV(state)));
+  $("#dl_banquier").addEventListener("click", exporterResume);
   $("#csv_in").addEventListener("change", (e) => {
     const file = e.target.files[0];
     if (!file) return;
