@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=58";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=58";
-import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=58";
-import * as sync from "./sync.js?v=58";
-import { askAI } from "./ai.js?v=58";
+} from "./data.js?v=59";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=59";
+import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=59";
+import * as sync from "./sync.js?v=59";
+import { askAI } from "./ai.js?v=59";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -249,12 +249,18 @@ function exporterResume(excludeEnt = false) {
   push("Régime matrimonial", REGIME_LABEL[state.regime || ""] || "non précisé");
   if (excludeEnt) push("Note", "Document volontairement établi HORS capital entreprise.");
   push("");
+  const avTotSynth = (d.avAvant70 || 0) + (d.avApres70 || 0);
+  const biensBrut = d.patrimoineFoyer + d.totalDettes; // biens hors AV, avant dettes (valeurs économiques, quote-part)
   push("SYNTHÈSE");
-  push("Patrimoine BRUT (avant dettes)", euro(d.patrimoineFoyer + d.totalDettes));
+  push("Biens hors AV (immobilier, SCI, titres, liquidités, entreprise) — brut", euro(biensBrut));
+  push("Assurance-vie / PER (capital)", euro(avTotSynth));
+  push("PATRIMOINE BRUT TOTAL (avant dettes)", euro(biensBrut + avTotSynth));
   push("Dettes totales", "− " + euro(d.totalDettes));
-  push("Patrimoine NET du foyer", euro(d.patrimoineFoyer));
+  push("PATRIMOINE NET TOTAL (biens nets + AV)", euro(d.patrimoineFoyer + avTotSynth));
+  push("");
+  push("— VOLET TRANSMISSION —");
   if (d.exonerationDutreil > 0) push("Exonération Dutreil (−75%)", euro(d.exonerationDutreil));
-  push("Assiette taxable (succession)", euro(d.patrimoineTaxable));
+  push("Assiette taxable succession (biens, hors AV avant 70)", euro(d.patrimoineTaxable));
   push("Droits de succession estimés (décès des 2 parents)", euro(d.droitsSuccessionEstimes));
   push("");
   const CATNET = { immobilier: "Immobilier (dont SCI)", sci: "Immobilier (dont SCI)", entreprise: "Entreprise", titres: "Titres / placements", liquidites: "Liquidités", autre: "Autre" };
