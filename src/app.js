@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=59";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=59";
-import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=59";
-import * as sync from "./sync.js?v=59";
-import { askAI } from "./ai.js?v=59";
+} from "./data.js?v=60";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=60";
+import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=60";
+import * as sync from "./sync.js?v=60";
+import { askAI } from "./ai.js?v=60";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -301,7 +301,7 @@ function exporterResume(excludeEnt = false) {
   });
   if (immoBrut > 0) push("SOUS-TOTAL IMMOBILIER + SCI", "", euro(immoBrut), "", immoDette ? "− " + euro(immoDette) : "", euro(immoBrut - immoDette));
   push("TOTAL ACTIFS", "", euro(totBrut), "", totDette ? "− " + euro(totDette) : "", euro(totBrut - totDette));
-  push("Lecture", "Valeur NETTE = Valeur BRUTE − Dette adossée (ce qui resterait après remboursement de l'emprunt). Le levier = dette / valeur brute.");
+  push("Lecture", "Valeurs = valeur MARCHANDE (vénale) actuelle, pas le prix d'achat. Valeur NETTE = Valeur BRUTE − Dette adossée (ce qui resterait après remboursement de l'emprunt). Levier = dette / valeur brute.");
   // Répartition détaillée : qui détient quoi
   const DROIT_TXT = { PP: "Pleine propriété", US: "Usufruit", NP: "Nue-propriété" };
   push("");
