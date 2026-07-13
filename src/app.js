@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=61";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=61";
-import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=61";
-import * as sync from "./sync.js?v=61";
-import { askAI } from "./ai.js?v=61";
+} from "./data.js?v=62";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=62";
+import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=62";
+import * as sync from "./sync.js?v=62";
+import { askAI } from "./ai.js?v=62";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -87,11 +87,28 @@ function load() {
   }
 }
 let cloudStatusCb = null;
+// Garde-fou : une "vraie" donnée a au moins une personne. On ne pousse JAMAIS
+// un état vide vers le cloud (ça écraserait les données) et on ne l'adopte pas non plus.
+function hasContent(s) { return !!(s && Array.isArray(s.personnes) && s.personnes.length > 0); }
+const BK_KEY = "patrimoine_famille_v1_backups";
+function pushBackup() {
+  if (!hasContent(state)) return;
+  try {
+    const arr = JSON.parse(localStorage.getItem(BK_KEY) || "[]");
+    const snap = JSON.stringify(state);
+    if (arr.length && arr[arr.length - 1].data === snap) return; // pas de doublon consécutif
+    arr.push({ ts: Date.now(), data: snap });
+    while (arr.length > 10) arr.shift();
+    localStorage.setItem(BK_KEY, JSON.stringify(arr));
+  } catch { /* backup best-effort */ }
+}
 function save() {
   state._ts = Date.now(); // horodatage : sert à savoir quelle version est la plus récente
   localStorage.setItem(KEY, JSON.stringify(state));
+  pushBackup(); // sauvegarde locale roulante (10 dernières versions non vides)
   try {
-    sync.scheduleAutoSave(() => state, (s, info) => { try { cloudStatusCb?.(s, info); } catch {} });
+    if (hasContent(state)) // ne jamais synchroniser un état vide vers le cloud
+      sync.scheduleAutoSave(() => state, (s, info) => { try { cloudStatusCb?.(s, info); } catch {} });
   } catch { /* la synchro cloud ne doit jamais casser l'app */ }
 }
 const personne = (id) => state.personnes.find((p) => p.id === id);
@@ -364,6 +381,12 @@ function renderDonnees() {
     </div>
 
     <div class="card">
+      <h3>🛟 Sauvegardes locales de secours</h3>
+      <p class="muted small">L'app conserve automatiquement les <b>10 dernières versions non vides</b> dans ce navigateur. En cas de fausse manip, restaure une version d'un clic.</p>
+      <div id="bk_list"></div>
+    </div>
+
+    <div class="card">
       <h3>Contenu actuel</h3>
       <div class="chips">
         <span class="chip">👤 ${n(state.personnes)} personnes</span>
@@ -391,6 +414,32 @@ function renderDonnees() {
   $("#dl_template").addEventListener("click", () => download("modele-patrimoine.csv", templateCSV()));
   $("#dl_export").addEventListener("click", () => download("mes-donnees-patrimoine.csv", stateToCSV(state)));
   $("#dl_banquier").addEventListener("click", () => exporterResume($("#exp_sans_ent")?.checked || false));
+
+  // Liste des sauvegardes locales de secours
+  const renderBackups = () => {
+    let arr = [];
+    try { arr = JSON.parse(localStorage.getItem(BK_KEY) || "[]"); } catch {}
+    const box = $("#bk_list");
+    if (!box) return;
+    if (!arr.length) { box.innerHTML = `<div class="muted small">Aucune sauvegarde de secours pour l'instant (elles se créent à chaque modification).</div>`; return; }
+    box.innerHTML = arr.slice().reverse().map((b, ri) => {
+      const i = arr.length - 1 - ri;
+      let s = {}; try { s = JSON.parse(b.data); } catch {}
+      const when = new Date(b.ts).toLocaleString("fr-FR");
+      return `<div class="mini-row" style="justify-content:space-between">
+        <span>${when} <span class="muted small">· ${(s.personnes || []).length} pers. · ${(s.actifs || []).length} actifs · ${(s.av || []).length} AV</span></span>
+        <button class="btn small bk_restore" data-i="${i}">Restaurer</button></div>`;
+    }).join("");
+    $$("#bk_list .bk_restore").forEach((btn) => btn.addEventListener("click", () => {
+      if (!confirm("Restaurer cette version ? Les données actuelles seront remplacées.")) return;
+      try {
+        const a2 = JSON.parse(localStorage.getItem(BK_KEY) || "[]");
+        const s = JSON.parse(a2[+btn.dataset.i].data);
+        state = s; save(); render();
+      } catch { alert("Restauration impossible."); }
+    }));
+  };
+  renderBackups();
   $("#csv_in").addEventListener("change", (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -1940,11 +1989,12 @@ document.addEventListener("DOMContentLoaded", async () => {
         const remote = await sync.cloudLoad();
         const localTs = state._ts || 0;
         const remoteTs = (remote && remote._ts) || 0;
-        if (remote && remoteTs > localTs) {
+        if (remote && remoteTs > localTs && (hasContent(remote) || !hasContent(state))) {
           // le cloud est strictement plus récent -> on l'adopte
+          // MAIS on n'adopte jamais un cloud VIDE par-dessus des données locales (garde-fou anti-écrasement)
           state = remote;
           localStorage.setItem(KEY, JSON.stringify(state));
-        } else if (localTs > remoteTs && sync.isAuto()) {
+        } else if (hasContent(state) && localTs > remoteTs && sync.isAuto()) {
           // local plus récent -> on pousse pour rattraper le cloud
           sync.cloudSave(state).catch(() => {});
         }
