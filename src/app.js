@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=57";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=57";
-import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=57";
-import * as sync from "./sync.js?v=57";
-import { askAI } from "./ai.js?v=57";
+} from "./data.js?v=58";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=58";
+import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=58";
+import * as sync from "./sync.js?v=58";
+import { askAI } from "./ai.js?v=58";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -926,6 +926,17 @@ function renderPatrimoine() {
           </div>`).join("") || `<div class="muted small">Aucune dette sur ce bien.</div>`}
         <button class="btn small" data-add="dette" data-ai="${ai}">+ dette sur ce bien</button>
       </div>
+
+      ${(() => {
+        const brut = Number(a.valeur) || 0;
+        const dette = dettesDe(a.id).reduce((s, o) => s + (Number(o.x.montant) || 0), 0);
+        if (!brut) return "";
+        return `<div class="result" style="margin-top:10px">
+          <div class="line"><span>Valeur brute${a.categorie === "immobilier" ? " (marchande)" : ""}</span><b>${eur(brut)}</b></div>
+          ${dette ? `<div class="line"><span>− Dette (capital restant dû)</span><b style="color:var(--danger)">− ${eur(dette)}</b></div>
+          <div class="line total"><span>= Valeur nette de ce bien</span><b style="color:var(--accent-2)">${eur(brut - dette)}</b></div>` : `<div class="line"><span class="muted small">Aucune dette → valeur nette = valeur brute</span><b></b></div>`}
+        </div>`;
+      })()}
     </div>`;
 
   // Regroupement des biens par catégorie (repliables)
@@ -939,7 +950,7 @@ function renderPatrimoine() {
     const collapsed = collapsedCats.has(key);
     return `<div class="cat-group">
       <button class="cat-header" data-togglecat="${key}">
-        <span>${CAT_LOOKUP[key] || key} <span class="muted small">· ${grp.length} bien(s) · net ${eur(net)}</span></span>
+        <span>${CAT_LOOKUP[key] || key} <span class="muted small">· ${grp.length} bien(s) · brut ${eur(total)}${dette ? ` − dette ${eur(dette)}` : ""} · <b>net ${eur(net)}</b></span></span>
         <span class="chevron">${collapsed ? "▸" : "▾"}</span>
       </button>
       ${collapsed ? "" : `<div class="cat-body">${grp.map((it) => assetCard(it.a, it.ai)).join("")}</div>`}
