@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=62";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=62";
-import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=62";
-import * as sync from "./sync.js?v=62";
-import { askAI } from "./ai.js?v=62";
+} from "./data.js?v=63";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=63";
+import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=63";
+import * as sync from "./sync.js?v=63";
+import { askAI } from "./ai.js?v=63";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -257,7 +257,7 @@ function exporterResume(excludeEnt = false) {
     };
   })() : state;
   const d = debrief(S);
-  const euro = (n) => Math.round(n || 0).toLocaleString("fr-FR") + " €";
+  const euro = (n) => Math.round(n || 0); // montants en NOMBRE brut (Excel/Numbers les additionne)
   const rows = [];
   const push = (...cells) => rows.push(cells);
 
@@ -272,7 +272,7 @@ function exporterResume(excludeEnt = false) {
   push(excludeEnt ? "Biens hors AV et HORS ENTREPRISE (immobilier, SCI, titres, liquidités) — brut" : "Biens hors AV (immobilier, SCI, titres, liquidités, entreprise) — brut", euro(biensBrut));
   push("Assurance-vie / PER (capital)", euro(avTotSynth));
   push("PATRIMOINE BRUT TOTAL (avant dettes)", euro(biensBrut + avTotSynth));
-  push("Dettes totales", "− " + euro(d.totalDettes));
+  push("Dettes totales", -euro(d.totalDettes));
   push("PATRIMOINE NET TOTAL (biens nets + AV)", euro(d.patrimoineFoyer + avTotSynth));
   push("");
   push("— VOLET TRANSMISSION —");
@@ -314,10 +314,10 @@ function exporterResume(excludeEnt = false) {
     const brut = a.valeur || 0;
     totBrut += brut; totDette += det;
     if (a.categorie === "immobilier" || a.categorie === "sci") { immoBrut += brut; immoDette += det; }
-    push(a.libelle, (CAT_LOOKUP[a.categorie] || a.categorie), euro(brut), a.dutreil ? "oui (−75%)" : "", det ? "− " + euro(det) : "", euro(brut - det));
+    push(a.libelle, (CAT_LOOKUP[a.categorie] || a.categorie), euro(brut), a.dutreil ? "oui (−75%)" : "", det ? -euro(det) : "", euro(brut - det));
   });
-  if (immoBrut > 0) push("SOUS-TOTAL IMMOBILIER + SCI", "", euro(immoBrut), "", immoDette ? "− " + euro(immoDette) : "", euro(immoBrut - immoDette));
-  push("TOTAL ACTIFS", "", euro(totBrut), "", totDette ? "− " + euro(totDette) : "", euro(totBrut - totDette));
+  if (immoBrut > 0) push("SOUS-TOTAL IMMOBILIER + SCI", "", euro(immoBrut), "", immoDette ? -euro(immoDette) : "", euro(immoBrut - immoDette));
+  push("TOTAL ACTIFS", "", euro(totBrut), "", totDette ? -euro(totDette) : "", euro(totBrut - totDette));
   push("Lecture", "Valeurs = valeur MARCHANDE (vénale) actuelle, pas le prix d'achat. Valeur NETTE = Valeur BRUTE − Dette adossée (ce qui resterait après remboursement de l'emprunt). Levier = dette / valeur brute.");
   // Répartition détaillée : qui détient quoi
   const DROIT_TXT = { PP: "Pleine propriété", US: "Usufruit", NP: "Nue-propriété" };
