@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=56";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=56";
-import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=56";
-import * as sync from "./sync.js?v=56";
-import { askAI } from "./ai.js?v=56";
+} from "./data.js?v=57";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=57";
+import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=57";
+import * as sync from "./sync.js?v=57";
+import { askAI } from "./ai.js?v=57";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -257,12 +257,13 @@ function exporterResume(excludeEnt = false) {
   push("Assiette taxable (succession)", euro(d.patrimoineTaxable));
   push("Droits de succession estimés (décès des 2 parents)", euro(d.droitsSuccessionEstimes));
   push("");
+  const CATNET = { immobilier: "Immobilier (dont SCI)", sci: "Immobilier (dont SCI)", entreprise: "Entreprise", titres: "Titres / placements", liquidites: "Liquidités", autre: "Autre" };
   const expoCsv = {};
-  Object.entries(d.parCategorie).forEach(([k, v]) => { const key = k === "sci" ? "immobilier (dont SCI)" : k; expoCsv[key] = (expoCsv[key] || 0) + v; });
+  Object.entries(d.parCategorie).forEach(([k, v]) => { const key = CATNET[k] || k; expoCsv[key] = (expoCsv[key] || 0) + v; });
   const avTot = (d.avAvant70 || 0) + (d.avApres70 || 0);
-  if (avTot > 0) expoCsv["assurance-vie"] = (expoCsv["assurance-vie"] || 0) + avTot;
+  if (avTot > 0) expoCsv["Assurance-vie / PER"] = (expoCsv["Assurance-vie / PER"] || 0) + avTot;
   const totalCat = Object.values(expoCsv).reduce((s, v) => s + v, 0) || 1;
-  push("EXPOSITION PAR CATÉGORIE", "Valeur", "Part");
+  push("EXPOSITION PAR CATÉGORIE (valeur NETTE, quote-part économique)", "Valeur nette", "Part");
   Object.entries(expoCsv).sort((a, b) => b[1] - a[1]).forEach(([k, v]) => push(k, euro(v), (v / totalCat * 100).toFixed(0) + " %"));
   push("");
   push("PATRIMOINE PAR PERSONNE", "Rôle", "Montant net");
@@ -489,7 +490,7 @@ async function renderOrganigramme() {
 
   // ---- ② Répartition miroir (2 parents) ----
   const catKey = (cat) => (cat === "sci" ? "immobilier" : cat);
-  const MIRLBL = { immobilier: "🏠 Immobilier + SCI", entreprise: "🏭 Entreprise", titres: "📈 Titres", liquidites: "💰 Liquidités", av: "🛡️ Assurance-vie" };
+  const MIRLBL = { immobilier: "🏠 Immobilier (dont SCI)", entreprise: "🏭 Entreprise", titres: "📈 Titres", liquidites: "💰 Liquidités", av: "🛡️ Assurance-vie" };
   const MIRORDER = ["immobilier", "entreprise", "titres", "liquidites", "av"];
   const parentCat = (p) => {
     const m = {};
@@ -534,7 +535,7 @@ async function renderOrganigramme() {
     const { pa, pb, keys } = mirrorData;
     const ageA = ageDe(pa), ageB = ageDe(pb);
     mirror = `<div class="card">
-      <div class="section-head"><div><h2>Répartition par catégorie et par parent</h2><div class="small muted">SCI regroupée avec l'immobilier ; assurance-vie ajoutée comme classe. Décoche une catégorie pour l'exclure (ex. retirer l'entreprise pour voir l'équilibre hors pro et simuler une donation).</div></div>
+      <div class="section-head"><div><h2>Répartition par catégorie et par parent</h2><div class="small muted"><b>Valeurs nettes</b> (après dettes, quote-part économique). SCI regroupée avec l'immobilier ; assurance-vie ajoutée comme classe. Décoche une catégorie pour l'exclure (ex. retirer l'entreprise pour voir l'équilibre hors pro et simuler une donation).</div></div>
         <div class="legend"><span><span class="dot" style="background:var(--accent)"></span>${pa.nom}${ageA != null ? ` (${ageA} ans)` : ""}</span><span><span class="dot" style="background:#6ea0e8"></span>${pb.nom}${ageB != null ? ` (${ageB} ans)` : ""}</span></div></div>
       <div class="chips" style="margin:2px 0 12px">${keys.map((k) => `<label class="benef-chk"><input type="checkbox" class="mir-cat" data-k="${k}" ${mirrorHidden.has(k) ? "" : "checked"}> ${MIRLBL[k] || k}</label>`).join("")}</div>
       <div class="mirror" id="mirror-body">${mirrorBody()}</div>
