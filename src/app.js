@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=51";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=51";
-import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=51";
-import * as sync from "./sync.js?v=51";
-import { askAI } from "./ai.js?v=51";
+} from "./data.js?v=52";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=52";
+import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=52";
+import * as sync from "./sync.js?v=52";
+import { askAI } from "./ai.js?v=52";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1328,7 +1328,14 @@ function renderAv() {
             <label>Régime des primes<select class="av_av70" ${a.per ? 'disabled title="Déterminé automatiquement par l’âge au décès pour un PER"' : ""}>${opt([["oui", "Avant 70 ans"], ["non", "Après 70 ans"]], a.avant70 ? "oui" : "non")}</select></label>
           </div>
           <label class="benef-chk" style="margin-top:2px"><input type="checkbox" class="av_per" ${a.per ? "checked" : ""}> 🏦 <b>PER assurantiel</b> <span class="muted small">— régime déterminé par l'âge du souscripteur au décès (&lt; 70 → 990 I ; ≥ 70 → 757 B, primes + gains). Saisis la valeur TOTALE du contrat.</span></label>
-          <div class="benef-row"><span class="muted small">Bénéficiaires :</span> ${benefBoxes(a, i)}
+          <label style="display:block;margin-top:8px">Type de clause bénéficiaire
+            <select class="av_clausetype">
+              <option value="designe" ${(a.clauseType || "designe") === "designe" ? "selected" : ""}>Bénéficiaires désignés (répartition ci-dessous)</option>
+              <option value="conjoint_defaut_enfants" ${a.clauseType === "conjoint_defaut_enfants" ? "selected" : ""}>Conjoint, à défaut les enfants</option>
+            </select>
+            ${a.clauseType === "conjoint_defaut_enfants" ? '<span class="muted small">Au 1ᵉʳ décès : le <b>conjoint</b> reçoit → <b>0 € de droits</b> (exonéré). Les enfants ne sont taxés qu\'au <b>2ᵈ décès</b> (à défaut).</span>' : ""}
+          </label>
+          <div class="benef-row"><span class="muted small">Bénéficiaires${a.clauseType === "conjoint_defaut_enfants" ? " « à défaut » (si le conjoint n'est plus là)" : ""} :</span> ${benefBoxes(a, i)}
             <button class="av_equal btn small" data-i="${i}">répartir également</button>
           </div>
           <label style="display:block;margin-top:10px" class="muted small">Clause bénéficiaire (texte exact du contrat)
@@ -1370,6 +1377,7 @@ function renderAv() {
     $(".av_an", row).addEventListener("input", (e) => { AV[i].annee = e.target.value === "" ? null : Number(e.target.value); save(); });
     $(".av_av70", row).addEventListener("change", (e) => { AV[i].avant70 = e.target.value === "oui"; save(); });
     $(".av_per", row).addEventListener("change", (e) => { AV[i].per = e.target.checked; save(); renderAv(); });
+    $(".av_clausetype", row).addEventListener("change", (e) => { AV[i].clauseType = e.target.value; save(); renderAv(); });
     $(".av_clause", row).addEventListener("input", (e) => { AV[i].clause = e.target.value; save(); });
     $(".av_verif", row).addEventListener("click", () => { AV[i].verifie = !AV[i].verifie; save(); renderAv(); });
     $(".av_del", row).addEventListener("click", () => { AV.splice(i, 1); save(); renderAv(); });

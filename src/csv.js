@@ -50,8 +50,8 @@ export function templateCSV() {
     "Jean Dupont,P1,Marie,E1,2019-05-01,100000,donation NP",
     "",
     "# ASSURANCE-VIE",
-    "id,libelle,etablissement,souscripteur,souscripteur_id,capital,regime,per,beneficiaires",
-    "AV1,Contrat AV Jean,Generali,Jean Dupont,P1,250000,avant 70 ans,,Marie",
+    "id,libelle,etablissement,souscripteur,souscripteur_id,capital,regime,per,clause,beneficiaires",
+    "AV1,Contrat AV Jean,Generali,Jean Dupont,P1,250000,avant 70 ans,,conjoint_defaut_enfants,Marie",
   ].join("\n");
 }
 
@@ -86,8 +86,8 @@ export function stateToCSV(state) {
   section("DONATIONS", ["donateur", "donateur_id", "beneficiaire", "beneficiaire_id", "date", "montant", "note"],
     (state.donations || []).map((d) => [nameOf(d.donateurId), d.donateurId, nameOf(d.beneficiaireId), d.beneficiaireId, d.date, d.montant, d.note || ""]));
 
-  section("ASSURANCE-VIE", ["id", "libelle", "etablissement", "souscripteur", "souscripteur_id", "capital", "regime", "per", "beneficiaires"],
-    (state.av || []).map((a) => [a.id, a.libelle, a.etablissement || "", nameOf(a.souscripteurId), a.souscripteurId, a.montant, a.avant70 ? "avant 70 ans" : "apres 70 ans", a.per ? "oui" : "", (a.beneficiaires || []).map(nameOf).join(";")]));
+  section("ASSURANCE-VIE", ["id", "libelle", "etablissement", "souscripteur", "souscripteur_id", "capital", "regime", "per", "clause", "beneficiaires"],
+    (state.av || []).map((a) => [a.id, a.libelle, a.etablissement || "", nameOf(a.souscripteurId), a.souscripteurId, a.montant, a.avant70 ? "avant 70 ans" : "apres 70 ans", a.per ? "oui" : "", a.clauseType || "designe", (a.beneficiaires || []).map(nameOf).join(";")]));
 
   if (state.regime) section("REGIME", ["regime"], [[state.regime]]);
 
@@ -171,7 +171,7 @@ function csvToStateSectioned(rows) {
       const sous = col(r, "souscripteur_id") || resolve(col(r, "souscripteur"), persByName) || col(r, "souscripteur");
       const reg = col(r, "regime");
       const bens = col(r, "beneficiaires").split(/[;|]/).map((s) => s.trim()).filter(Boolean).map((x) => resolve(x, persByName) || x);
-      st.av.push({ id: col(r, "id") || uid(), libelle: col(r, "libelle"), etablissement: col(r, "etablissement"), souscripteurId: sous, montant: num(col(r, "capital") || col(r, "valeur")), avant70: /avant/i.test(reg) || yes(reg), per: yes(col(r, "per")), beneficiaires: bens });
+      st.av.push({ id: col(r, "id") || uid(), libelle: col(r, "libelle"), etablissement: col(r, "etablissement"), souscripteurId: sous, montant: num(col(r, "capital") || col(r, "valeur")), avant70: /avant/i.test(reg) || yes(reg), per: yes(col(r, "per")), clauseType: col(r, "clause") || "designe", beneficiaires: bens });
     } else if (section.startsWith("REGIME") || section.startsWith("PARAM")) {
       st.regime = col(r, "regime") || String(r[0] ?? "").trim();
     }

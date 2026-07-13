@@ -1,7 +1,7 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=51";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=52";
 
 // Année de naissance : la DATE complète prime (plus précise), puis année seule, puis âge
 function birthYear(p) {
@@ -219,6 +219,11 @@ export function debrief(state) {
   });
 
   // Assurance-vie (+ PER assurantiels). Régime effectif via avAvant70Effectif().
+  // Clause « conjoint à défaut enfants » : au 1er décès le contrat revient au conjoint
+  // survivant, TOTALEMENT exonéré (loi TEPA) → 0 droit, pas de réintégration. Les enfants
+  // ne sont taxés qu'au 2d décès (géré dans simulerDeces). Ici (snapshot « décès aujourd'hui »),
+  // le conjoint est réputé vivant → ces contrats ne génèrent aucun droit.
+  const goesToConjoint = (a) => (a.clauseType || "designe") === "conjoint_defaut_enfants" && parents.some((p) => p.id !== a.souscripteurId);
   let avAvant70 = 0, avApres70 = 0;
   av.forEach((a) => (avAvant70Effectif(a, personnes) ? (avAvant70 += a.montant) : (avApres70 += a.montant)));
 
@@ -227,7 +232,7 @@ export function debrief(state) {
   av.forEach((a) => {
     const m = Number(a.montant) || 0;
     const bens = a.beneficiaires || [];
-    if (!bens.length || m <= 0) return;
+    if (!bens.length || m <= 0 || goesToConjoint(a)) return; // conjoint bénéficiaire → exonéré
     const av70 = avAvant70Effectif(a, personnes);
     const rep = a.repartition || {};
     const totalRep = bens.reduce((s, b) => s + (Number(rep[b]) || 0), 0);
@@ -249,7 +254,9 @@ export function debrief(state) {
   }).filter((x) => x.capital > 0);
   const totalDroitsAV = avBeneficiaires.reduce((s, x) => s + x.droits, 0);
   // Primes après 70 ans (757 B) : au-delà de l'abattement global, réintégrées à la succession
-  const apres70Reintegre = Math.max(0, avApres70 - AV_APRES_70.abattementGlobal);
+  // (hors contrats qui reviennent au conjoint exonéré au 1er décès)
+  const apres70TaxableSum = av.filter((a) => !avAvant70Effectif(a, personnes) && !goesToConjoint(a)).reduce((s, a) => s + (Number(a.montant) || 0), 0);
+  const apres70Reintegre = Math.max(0, apres70TaxableSum - AV_APRES_70.abattementGlobal);
 
   // « Si décès aujourd'hui » — détail par enfant.
   // Hypothèse simple : patrimoine réparti également entre les enfants, chaque
@@ -484,10 +491,14 @@ export function simulerDeces(state, defuntId) {
     return { rows, total: rows.reduce((s, r) => s + r.droits, 0) };
   };
 
-  // Taxation 990 I (primes avant 70 ans) par bénéficiaire, sur un jeu de contrats
-  const taxeAV990 = (contrats) => {
+  // Clause « conjoint à défaut enfants » : si le conjoint est VIVANT au dénouement (1er décès),
+  // il reçoit le contrat totalement exonéré (0 droit). S'il n'est plus là (2d décès), les enfants
+  // reçoivent « à défaut » et sont taxés normalement.
+  const goesToConjoint = (a) => (a.clauseType || "designe") === "conjoint_defaut_enfants" && conjoint;
+  // Taxation 990 I (primes avant 70 ans) par bénéficiaire, sur un jeu de contrats (spouseAlive = conjoint vivant)
+  const taxeAV990 = (contrats, spouseAlive) => {
     const benef = {};
-    contrats.filter((a) => avAvant70Effectif(a, personnes)).forEach((a) => {
+    contrats.filter((a) => avAvant70Effectif(a, personnes) && !(spouseAlive && goesToConjoint(a))).forEach((a) => {
       const m = Number(a.montant) || 0; const bens = a.beneficiaires || []; if (!bens.length || m <= 0) return;
       const rep = a.repartition || {}; const tot = bens.reduce((s, b) => s + (Number(rep[b]) || 0), 0);
       bens.forEach((b) => { const sh = tot > 0 ? (Number(rep[b]) || 0) / tot : 1 / bens.length; benef[b] = (benef[b] || 0) + m * sh; });
@@ -500,25 +511,25 @@ export function simulerDeces(state, defuntId) {
     }).filter((x) => x.capital > 0);
   };
   // Primes après 70 ans réintégrées (au-delà de l'abattement global 30 500 €)
-  const reintegreApres70 = (contrats) => Math.max(0, contrats.filter((a) => !avAvant70Effectif(a, personnes)).reduce((t, a) => t + (Number(a.montant) || 0), 0) - AV_APRES_70.abattementGlobal);
+  const reintegreApres70 = (contrats, spouseAlive) => Math.max(0, contrats.filter((a) => !avAvant70Effectif(a, personnes) && !(spouseAlive && goesToConjoint(a))).reduce((t, a) => t + (Number(a.montant) || 0), 0) - AV_APRES_70.abattementGlobal);
 
   // Contrats dénoués : au 1er décès ceux du défunt (hors co-adhésion) ; au 2d ceux du conjoint + toute co-adhésion
   const contrats1 = av.filter((a) => a.souscripteurId === defuntId && !a.cosouscripteurId);
   const contrats2 = av.filter((a) => (conjoint && a.souscripteurId === conjoint.id && !a.cosouscripteurId) || a.cosouscripteurId);
 
-  // 1er décès
-  const reint1 = reintegreApres70(contrats1);
+  // 1er décès (conjoint VIVANT → clause conjoint = exonéré)
+  const reint1 = reintegreApres70(contrats1, true);
   const enf1 = partEnfants(masseBiens1 + reint1, defuntId);
-  const av1 = taxeAV990(contrats1);
+  const av1 = taxeAV990(contrats1, true);
   const droitsAV1 = av1.reduce((s, x) => s + x.droits, 0);
-  const avDenouees1 = contrats1.filter((a) => avAvant70Effectif(a, personnes)).map((a) => ({ contrat: a.libelle || a.id, beneficiaires: taxeAV990([a]) }));
+  const avDenouees1 = contrats1.filter((a) => avAvant70Effectif(a, personnes) && !goesToConjoint(a)).map((a) => ({ contrat: a.libelle || a.id, beneficiaires: taxeAV990([a], true) }));
   const totalDroitsPremier = enf1.total + droitsAV1;
   const abattementsPerdus = attribution ? ABATTEMENTS.enfant * enfants.length : 0;
 
-  // 2d décès (conjoint survivant, « demain »)
-  const reint2 = reintegreApres70(contrats2);
+  // 2d décès (conjoint décédé → clause « à défaut enfants » s'applique → enfants taxés)
+  const reint2 = reintegreApres70(contrats2, false);
   const enf2 = partEnfants(masseBiens2 + reint2, conjoint ? conjoint.id : null);
-  const av2 = taxeAV990(contrats2);
+  const av2 = taxeAV990(contrats2, false);
   const droitsAV2 = av2.reduce((s, x) => s + x.droits, 0);
   const totalDroitsSecond = enf2.total + droitsAV2;
 
