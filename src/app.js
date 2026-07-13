@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=60";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=60";
-import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=60";
-import * as sync from "./sync.js?v=60";
-import { askAI } from "./ai.js?v=60";
+} from "./data.js?v=61";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=61";
+import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=61";
+import * as sync from "./sync.js?v=61";
+import { askAI } from "./ai.js?v=61";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -252,7 +252,7 @@ function exporterResume(excludeEnt = false) {
   const avTotSynth = (d.avAvant70 || 0) + (d.avApres70 || 0);
   const biensBrut = d.patrimoineFoyer + d.totalDettes; // biens hors AV, avant dettes (valeurs économiques, quote-part)
   push("SYNTHÈSE");
-  push("Biens hors AV (immobilier, SCI, titres, liquidités, entreprise) — brut", euro(biensBrut));
+  push(excludeEnt ? "Biens hors AV et HORS ENTREPRISE (immobilier, SCI, titres, liquidités) — brut" : "Biens hors AV (immobilier, SCI, titres, liquidités, entreprise) — brut", euro(biensBrut));
   push("Assurance-vie / PER (capital)", euro(avTotSynth));
   push("PATRIMOINE BRUT TOTAL (avant dettes)", euro(biensBrut + avTotSynth));
   push("Dettes totales", "− " + euro(d.totalDettes));
