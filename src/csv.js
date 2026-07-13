@@ -12,6 +12,10 @@ export const COLUMNS = [
   "date", "montant", "avant_70", "note", "dutreil",
 ];
 
+// Séparateur d'export : point-virgule (compatible Excel/Numbers en français,
+// où la virgule est le séparateur décimal). L'import détecte automatiquement , ou ;.
+const SEP = ";";
+
 // --- Sérialisation ---
 function esc(v) {
   const s = String(v ?? "");
@@ -22,37 +26,37 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 // Modèle vierge (format sectionné, avec exemples à remplacer)
 export function templateCSV() {
   return [
-    "# PERSONNES",
-    "id,nom,role,naissance",
-    "P1,Jean Dupont,parent,1958-04-12",
-    "P2,Anne Dupont,parent,1961-09-03",
-    "E1,Marie,enfant,1988-01-20",
-    "",
-    "# ACTIFS",
-    "id,libelle,categorie,valeur,dutreil,annee_demembrement",
-    "B1,Résidence principale,immobilier,550000,,",
-    "SCI1,SCI Familiale,sci,900000,,",
-    "ENT1,Parts société,entreprise,600000,oui,2025",
-    "",
-    "# DETENTIONS",
-    "detenteur,detenteur_id,actif,actif_id,part_pct,droit",
-    "Jean Dupont,P1,Résidence principale,B1,50,PP",
-    "Anne Dupont,P2,Résidence principale,B1,50,PP",
-    "Jean Dupont,P1,Parts société,ENT1,51,PP",
-    "Marie,E1,Parts société,ENT1,49,NP",
-    "",
-    "# DETTES",
-    "id,libelle,montant,adosse_a,adosse_a_id",
-    "DET1,Emprunt SCI,300000,SCI Familiale,SCI1",
-    "",
-    "# DONATIONS",
-    "donateur,donateur_id,beneficiaire,beneficiaire_id,date,montant,note",
-    "Jean Dupont,P1,Marie,E1,2019-05-01,100000,donation NP",
-    "",
-    "# ASSURANCE-VIE",
-    "id,libelle,etablissement,souscripteur,souscripteur_id,capital,regime,per,clause,beneficiaires",
-    "AV1,Contrat AV Jean,Generali,Jean Dupont,P1,250000,avant 70 ans,,conjoint_defaut_enfants,Marie",
-  ].join("\n");
+    ["# PERSONNES"],
+    ["id", "nom", "role", "naissance"],
+    ["P1", "Jean Dupont", "parent", "1958-04-12"],
+    ["P2", "Anne Dupont", "parent", "1961-09-03"],
+    ["E1", "Marie", "enfant", "1988-01-20"],
+    [""],
+    ["# ACTIFS"],
+    ["id", "libelle", "categorie", "valeur", "dutreil", "annee_demembrement"],
+    ["B1", "Résidence principale", "immobilier", "550000", "", ""],
+    ["SCI1", "SCI Familiale", "sci", "900000", "", ""],
+    ["ENT1", "Parts société", "entreprise", "600000", "oui", "2025"],
+    [""],
+    ["# DETENTIONS"],
+    ["detenteur", "detenteur_id", "actif", "actif_id", "part_pct", "droit"],
+    ["Jean Dupont", "P1", "Résidence principale", "B1", "50", "PP"],
+    ["Anne Dupont", "P2", "Résidence principale", "B1", "50", "PP"],
+    ["Jean Dupont", "P1", "Parts société", "ENT1", "51", "PP"],
+    ["Marie", "E1", "Parts société", "ENT1", "49", "NP"],
+    [""],
+    ["# DETTES"],
+    ["id", "libelle", "montant", "adosse_a", "adosse_a_id"],
+    ["DET1", "Emprunt SCI", "300000", "SCI Familiale", "SCI1"],
+    [""],
+    ["# DONATIONS"],
+    ["donateur", "donateur_id", "beneficiaire", "beneficiaire_id", "date", "montant", "note"],
+    ["Jean Dupont", "P1", "Marie", "E1", "2019-05-01", "100000", "donation NP"],
+    [""],
+    ["# ASSURANCE-VIE"],
+    ["id", "libelle", "etablissement", "souscripteur", "souscripteur_id", "capital", "regime", "per", "clause", "beneficiaires"],
+    ["AV1", "Contrat AV Jean", "Generali", "Jean Dupont", "P1", "250000", "avant 70 ans", "", "conjoint_defaut_enfants", "Marie"],
+  ].map((r) => r.map(esc).join(SEP)).join("\n");
 }
 
 export function stateToCSV(state) {
@@ -66,8 +70,8 @@ export function stateToCSV(state) {
   const L = [];
   const section = (title, header, rows) => {
     L.push("# " + title);
-    L.push(header.join(","));
-    rows.forEach((r) => L.push(r.map(esc).join(",")));
+    L.push(header.join(SEP));
+    rows.forEach((r) => L.push(r.map(esc).join(SEP)));
     L.push(""); // ligne vide de séparation
   };
 
@@ -87,15 +91,24 @@ export function stateToCSV(state) {
     (state.donations || []).map((d) => [nameOf(d.donateurId), d.donateurId, nameOf(d.beneficiaireId), d.beneficiaireId, d.date, d.montant, d.note || ""]));
 
   section("ASSURANCE-VIE", ["id", "libelle", "etablissement", "souscripteur", "souscripteur_id", "capital", "regime", "per", "clause", "beneficiaires"],
-    (state.av || []).map((a) => [a.id, a.libelle, a.etablissement || "", nameOf(a.souscripteurId), a.souscripteurId, a.montant, a.avant70 ? "avant 70 ans" : "apres 70 ans", a.per ? "oui" : "", a.clauseType || "designe", (a.beneficiaires || []).map(nameOf).join(";")]));
+    (state.av || []).map((a) => [a.id, a.libelle, a.etablissement || "", nameOf(a.souscripteurId), a.souscripteurId, a.montant, a.avant70 ? "avant 70 ans" : "apres 70 ans", a.per ? "oui" : "", a.clauseType || "designe", (a.beneficiaires || []).map(nameOf).join("|")]));
 
   if (state.regime) section("REGIME", ["regime"], [[state.regime]]);
 
   return L.join("\n").replace(/\n+$/, "") + "\n";
 }
 
+// Détecte le séparateur (; ou ,) d'après la 1re ligne de données non commentée
+function detectSep(text) {
+  const line = text.split(/\r?\n/).find((l) => l.trim() && !l.trim().startsWith("#")) || "";
+  const commas = (line.match(/,/g) || []).length;
+  const semis = (line.match(/;/g) || []).length;
+  return semis > commas ? ";" : ",";
+}
+
 // --- Parsing (petit parseur CSV tolérant guillemets) ---
-function parseCSV(text) {
+function parseCSV(text, sep) {
+  sep = sep || detectSep(text);
   const rows = [];
   let row = [], field = "", q = false;
   for (let i = 0; i < text.length; i++) {
@@ -105,7 +118,7 @@ function parseCSV(text) {
       else field += c;
     } else {
       if (c === '"') q = true;
-      else if (c === ",") { row.push(field); field = ""; }
+      else if (c === sep) { row.push(field); field = ""; }
       else if (c === "\n" || c === "\r") {
         if (c === "\r" && text[i + 1] === "\n") i++;
         row.push(field); field = "";
