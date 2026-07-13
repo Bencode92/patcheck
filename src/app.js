@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=54";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=54";
-import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=54";
-import * as sync from "./sync.js?v=54";
-import { askAI } from "./ai.js?v=54";
+} from "./data.js?v=55";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=55";
+import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=55";
+import * as sync from "./sync.js?v=55";
+import { askAI } from "./ai.js?v=55";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -227,15 +227,27 @@ function download(name, content, mime = "text/csv;charset=utf-8") {
 }
 
 // Export d'un RÉSUMÉ lisible en CSV (synthèse, exposition, droits par enfant, AV, donations)
-function exporterResume() {
-  const d = debrief(state);
+// excludeEnt = true → retire l'entreprise (actifs, détentions, dettes adossées) pour ne pas
+// tout dévoiler ; tout se recalcule de façon cohérente sur l'état filtré.
+function exporterResume(excludeEnt = false) {
+  const S = excludeEnt ? (() => {
+    const entIds = new Set((state.actifs || []).filter((a) => a.categorie === "entreprise").map((a) => a.id));
+    return {
+      ...state,
+      actifs: (state.actifs || []).filter((a) => !entIds.has(a.id)),
+      detentions: (state.detentions || []).filter((dd) => !entIds.has(dd.actifRef)),
+      dettes: (state.dettes || []).filter((x) => !entIds.has(x.cible)),
+    };
+  })() : state;
+  const d = debrief(S);
   const euro = (n) => Math.round(n || 0).toLocaleString("fr-FR") + " €";
   const rows = [];
   const push = (...cells) => rows.push(cells);
 
-  push("RÉSUMÉ PATRIMONIAL");
+  push("RÉSUMÉ PATRIMONIAL" + (excludeEnt ? " (HORS ENTREPRISE)" : ""));
   push("Édité le", new Date().toLocaleDateString("fr-FR"));
   push("Régime matrimonial", REGIME_LABEL[state.regime || ""] || "non précisé");
+  if (excludeEnt) push("Note", "Document volontairement établi HORS capital entreprise.");
   push("");
   push("SYNTHÈSE");
   push("Patrimoine net du foyer", euro(d.patrimoineFoyer));
@@ -253,7 +265,7 @@ function exporterResume() {
   Object.entries(expoCsv).sort((a, b) => b[1] - a[1]).forEach(([k, v]) => push(k, euro(v), (v / totalCat * 100).toFixed(0) + " %"));
   push("");
   push("PATRIMOINE PAR PERSONNE", "Rôle", "Montant net");
-  state.personnes.forEach((p) => push(p.nom, p.role, euro(d.parPersonne[p.id] || 0)));
+  S.personnes.forEach((p) => push(p.nom, p.role, euro(d.parPersonne[p.id] || 0)));
   push("");
   push("SI DÉCÈS AUJOURD'HUI — PAR ENFANT", "Part reçue", "Abattement", "Base taxable", "Droits à payer", "Net perçu");
   (d.successionParEnfant || []).forEach((e) => push(e.nom, euro(e.recu), euro(e.abattement), euro(e.base), euro(e.droits), euro(e.net)));
@@ -267,11 +279,11 @@ function exporterResume() {
   }
   // Biens & actifs (avec dette adossée et valeur nette)
   const detteActif = {};
-  (state.dettes || []).forEach((x) => { detteActif[x.cible] = (detteActif[x.cible] || 0) + x.montant; });
-  const nameOf = (id) => personne(id)?.nom || (state.actifs || []).find((a) => a.id === id)?.libelle || id;
+  (S.dettes || []).forEach((x) => { detteActif[x.cible] = (detteActif[x.cible] || 0) + x.montant; });
+  const nameOf = (id) => personne(id)?.nom || (S.actifs || []).find((a) => a.id === id)?.libelle || id;
   push("");
   push("BIENS & ACTIFS", "Catégorie", "Valeur", "Pacte Dutreil", "Dette adossée", "Valeur nette");
-  (state.actifs || []).forEach((a) => {
+  (S.actifs || []).forEach((a) => {
     const det = detteActif[a.id] || 0;
     push(a.libelle, (CAT_LOOKUP[a.categorie] || a.categorie), euro(a.valeur), a.dutreil ? "oui (−75%)" : "", det ? euro(det) : "", euro((a.valeur || 0) - det));
   });
@@ -279,22 +291,22 @@ function exporterResume() {
   const DROIT_TXT = { PP: "Pleine propriété", US: "Usufruit", NP: "Nue-propriété" };
   push("");
   push("QUI DÉTIENT QUOI (répartition)", "Bien / actif", "Quote-part", "Droit", "Valeur détenue");
-  state.personnes.forEach((p) => {
+  S.personnes.forEach((p) => {
     (d.parPersonneDetail[p.id] || []).forEach((it) => {
       const droit = (DROIT_TXT[it.droit] || it.droit) + (it.droit !== "PP" ? ` (${Math.round(it.fraction * 100)}% — 669)` : "");
       push(p.nom, it.libelle, it.part + " %", droit, euro(it.valeur));
     });
   });
   // Endettement
-  if ((state.dettes || []).length) {
+  if ((S.dettes || []).length) {
     push("");
     push("DETTES / ENDETTEMENT", "Montant dû", "Adossé à");
-    (state.dettes || []).forEach((x) => push(x.libelle || "Emprunt", euro(x.montant), nameOf(x.cible)));
+    (S.dettes || []).forEach((x) => push(x.libelle || "Emprunt", euro(x.montant), nameOf(x.cible)));
     push("TOTAL DETTES", euro(d.totalDettes), "");
   }
   push("");
   push("ASSURANCE-VIE / PER", "Établissement", "Souscripteur(s)", "Capital", "Régime", "Clause bénéficiaire", "Bénéficiaires + répartition");
-  (state.av || []).forEach((a) => {
+  (S.av || []).forEach((a) => {
     const bens = (a.beneficiaires || []).map((b) => { const nom = personne(b)?.nom || b; const pc = a.repartition?.[b]; return pc ? `${nom} ${pc}%` : nom; }).join(" / ");
     const sous = (personne(a.souscripteurId)?.nom || "") + (a.cosouscripteurId ? " & " + (personne(a.cosouscripteurId)?.nom || "") : "");
     const clause = a.clauseType === "conjoint_defaut_enfants" ? "Conjoint, à défaut les enfants" : "Bénéficiaires désignés";
@@ -303,13 +315,13 @@ function exporterResume() {
   });
   push("");
   push("DONATIONS RÉALISÉES", "Date", "Donateur", "Bénéficiaire", "Montant", "Statut rappel 15 ans");
-  state.donations.forEach((x) => {
+  (S.donations || []).forEach((x) => {
     const purge = anneesEcoulees(x.date) >= DELAI_RAPPEL_ANS;
     push("", x.date, personne(x.donateurId)?.nom || "", personne(x.beneficiaireId)?.nom || "", euro(x.montant), purge ? "purgée (>15 ans)" : "rapportable (<15 ans)");
   });
 
   const esc = (s) => { s = String(s ?? ""); return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-  download("patrimoine-pour-banquier.csv", rows.map((r) => r.map(esc).join(";")).join("\n"));
+  download(excludeEnt ? "patrimoine-hors-entreprise.csv" : "patrimoine-pour-banquier.csv", rows.map((r) => r.map(esc).join(";")).join("\n"));
 }
 
 // ---------- Onglet Données (CSV) ----------
@@ -327,11 +339,12 @@ function renderDonnees() {
       <p class="muted">Remplis un tableur avec tes vraies données, exporte en CSV, puis importe-le ici. L'organigramme et le débrief se génèrent automatiquement. Tu peux aussi ré-exporter à tout moment le CSV consolidé pour l'envoyer à un tiers.</p>
       <div class="form-row" style="align-items:center">
         <button id="dl_banquier" class="btn primary">📄 Export lisible (banquier / notaire)</button>
+        <label class="benef-chk"><input type="checkbox" id="exp_sans_ent"> sans l'entreprise</label>
         <button id="dl_export" class="btn">⬇ Export technique (sauvegarde / ré-import)</button>
         <button id="dl_template" class="btn ghost">Modèle CSV</button>
         <label class="btn ghost">⬆ Importer un CSV<input id="csv_in" type="file" accept=".csv,text/csv" hidden></label>
       </div>
-      <p class="muted small">📄 <b>Export banquier</b> : document de synthèse <b>sans codes techniques</b> — biens, qui détient quoi, endettement, clauses AV, donations. À envoyer à ton conseiller. · ⬇ <b>Export technique</b> : fichier complet avec identifiants, pour <b>ré-importer</b> ou sauvegarder.</p>
+      <p class="muted small">📄 <b>Export banquier</b> : document de synthèse <b>sans codes techniques</b> — biens, qui détient quoi, endettement, clauses AV, donations. Coche <b>« sans l'entreprise »</b> pour l'exclure (biens, détentions, dettes, droits recalculés hors pro). · ⬇ <b>Export technique</b> : fichier complet avec identifiants, pour <b>ré-importer</b> ou sauvegarder.</p>
       <div id="csv_msg"></div>
     </div>
 
@@ -362,7 +375,7 @@ function renderDonnees() {
 
   $("#dl_template").addEventListener("click", () => download("modele-patrimoine.csv", templateCSV()));
   $("#dl_export").addEventListener("click", () => download("mes-donnees-patrimoine.csv", stateToCSV(state)));
-  $("#dl_banquier").addEventListener("click", exporterResume);
+  $("#dl_banquier").addEventListener("click", () => exporterResume($("#exp_sans_ent")?.checked || false));
   $("#csv_in").addEventListener("change", (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -682,7 +695,7 @@ async function renderOrganigramme() {
     </div>`;
 
   // Interactions
-  $("#exp_resume")?.addEventListener("click", exporterResume);
+  $("#exp_resume")?.addEventListener("click", () => exporterResume(false));
   const tgl = $("#toggle_all");
   if (tgl) tgl.addEventListener("click", () => {
     const open = tgl.textContent.includes("déplier");
