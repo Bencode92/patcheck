@@ -2,11 +2,11 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=55";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=55";
-import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=55";
-import * as sync from "./sync.js?v=55";
-import { askAI } from "./ai.js?v=55";
+} from "./data.js?v=56";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=56";
+import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=56";
+import * as sync from "./sync.js?v=56";
+import { askAI } from "./ai.js?v=56";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -250,8 +250,9 @@ function exporterResume(excludeEnt = false) {
   if (excludeEnt) push("Note", "Document volontairement établi HORS capital entreprise.");
   push("");
   push("SYNTHÈSE");
-  push("Patrimoine net du foyer", euro(d.patrimoineFoyer));
-  push("Dettes totales", euro(d.totalDettes));
+  push("Patrimoine BRUT (avant dettes)", euro(d.patrimoineFoyer + d.totalDettes));
+  push("Dettes totales", "− " + euro(d.totalDettes));
+  push("Patrimoine NET du foyer", euro(d.patrimoineFoyer));
   if (d.exonerationDutreil > 0) push("Exonération Dutreil (−75%)", euro(d.exonerationDutreil));
   push("Assiette taxable (succession)", euro(d.patrimoineTaxable));
   push("Droits de succession estimés (décès des 2 parents)", euro(d.droitsSuccessionEstimes));
@@ -282,11 +283,18 @@ function exporterResume(excludeEnt = false) {
   (S.dettes || []).forEach((x) => { detteActif[x.cible] = (detteActif[x.cible] || 0) + x.montant; });
   const nameOf = (id) => personne(id)?.nom || (S.actifs || []).find((a) => a.id === id)?.libelle || id;
   push("");
-  push("BIENS & ACTIFS", "Catégorie", "Valeur", "Pacte Dutreil", "Dette adossée", "Valeur nette");
+  push("BIENS & ACTIFS", "Catégorie", "Valeur BRUTE", "Pacte Dutreil", "Dette adossée", "Valeur NETTE");
+  let totBrut = 0, totDette = 0, immoBrut = 0, immoDette = 0;
   (S.actifs || []).forEach((a) => {
     const det = detteActif[a.id] || 0;
-    push(a.libelle, (CAT_LOOKUP[a.categorie] || a.categorie), euro(a.valeur), a.dutreil ? "oui (−75%)" : "", det ? euro(det) : "", euro((a.valeur || 0) - det));
+    const brut = a.valeur || 0;
+    totBrut += brut; totDette += det;
+    if (a.categorie === "immobilier" || a.categorie === "sci") { immoBrut += brut; immoDette += det; }
+    push(a.libelle, (CAT_LOOKUP[a.categorie] || a.categorie), euro(brut), a.dutreil ? "oui (−75%)" : "", det ? "− " + euro(det) : "", euro(brut - det));
   });
+  if (immoBrut > 0) push("SOUS-TOTAL IMMOBILIER + SCI", "", euro(immoBrut), "", immoDette ? "− " + euro(immoDette) : "", euro(immoBrut - immoDette));
+  push("TOTAL ACTIFS", "", euro(totBrut), "", totDette ? "− " + euro(totDette) : "", euro(totBrut - totDette));
+  push("Lecture", "Valeur NETTE = Valeur BRUTE − Dette adossée (ce qui resterait après remboursement de l'emprunt). Le levier = dette / valeur brute.");
   // Répartition détaillée : qui détient quoi
   const DROIT_TXT = { PP: "Pleine propriété", US: "Usufruit", NP: "Nue-propriété" };
   push("");
