@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=77";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=77";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=77";
-import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant } from "./optim.js?v=77";
-import * as sync from "./sync.js?v=77";
-import { askAI } from "./ai.js?v=77";
+} from "./data.js?v=78";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=78";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=78";
+import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant } from "./optim.js?v=78";
+import * as sync from "./sync.js?v=78";
+import { askAI } from "./ai.js?v=78";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1043,7 +1043,7 @@ function renderPatrimoine() {
     if (a.categorie === "capitalisation") {
       bits.push(`🏦 <b>Contrat de capitalisation</b> : contrairement à l'assurance-vie, il <b>ne se dénoue PAS</b> au décès — il <b>entre dans la succession</b> (taxé au barème ligne directe, abattement 100 000 €/parent/enfant, PAS d'abattement 152 500 €). L'héritier le <b>conserve avec son antériorité fiscale</b>. Démembrable comme un autre bien.`);
       if (detenteursDe(a.id).some((o) => o.d.droit !== "PP"))
-        bits.push(`⚠️ <b>Démembré</b> : au décès, la NP se consolide <b>sans droits</b> (art. 1133, plus-value DMTG exonérée). MAIS au <b>rachat futur par l'héritier</b>, la plus-value IR/PS se calcule sur la <b>valeur de la NP au jour de la donation</b> (BOI-RPPM-RCM-20-10-20-50 §225) — <b>pas de step-up</b> au décès : la fraction usufruit + la plus-value post-donation restent imposables. Point <b>non tranché</b> (QE Daubresse n°07190, 2026, sans réponse). <b>Convention de démembrement écrite indispensable</b> (rachats de l'usufruitier limités aux produits) — risque art. 774 bis / abus de droit. À valider notaire/fiscaliste.`);
+        bits.push(`⚠️ <b>Démembré</b> : au décès, la NP se consolide <b>sans droits</b> (art. 1133, plus-value DMTG exonérée). MAIS au <b>rachat futur par l'héritier</b>, le prix d'acquisition retenu = <b>valeur de la NP au jour de la donation</b> (BOI-RPPM-RCM-20-10-20-50 §225) → <b>purge seulement PARTIELLE</b> (à hauteur de la NP), <b>pas de step-up</b> au décès : la <b>fraction usufruit</b> + <b>toute la plus-value post-donation</b> restent imposables à l'IR/PS. Une donation en <b>pleine propriété</b>, elle, purge TOUT → le démembrement optimise les droits de donation mais <b>dégrade la fiscalité IR du rachat</b> (arbitrage central). Ex. (QE Daubresse) : primes 80, valeur donation 100 (NP 50), décès 120, rachat 150 → gain imposé <b>150−50=100</b> alors que le gain réel des enfants ≈ 50. Point <b>non tranché</b> (QE Sénat n°07190, sans réponse). <b>Convention de démembrement écrite indispensable</b> — risque art. 774 bis / abus de droit. À valider notaire/fiscaliste.`);
     }
     return bits.join(" · ");
   };
