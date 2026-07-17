@@ -3,11 +3,11 @@
 //  Consomme debrief(state) + barèmes data.js. Zéro DOM.
 //  Tout est INDICATIF, à valider avec un notaire.
 // =============================================================
-import { debrief } from "./graph.js?v=68";
+import { debrief } from "./graph.js?v=69";
 import {
   ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70,
   BAREME_LIGNE_DIRECTE, calculDroits, tauxUsufruit,
-} from "./data.js?v=68";
+} from "./data.js?v=69";
 
 const PLAFOND_AV = AV_AVANT_70.abattement; // 152 500 € / bénéficiaire (990 I)
 

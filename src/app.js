@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=68";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=68";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=68";
-import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine } from "./optim.js?v=68";
-import * as sync from "./sync.js?v=68";
-import { askAI } from "./ai.js?v=68";
+} from "./data.js?v=69";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=69";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=69";
+import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine } from "./optim.js?v=69";
+import * as sync from "./sync.js?v=69";
+import { askAI } from "./ai.js?v=69";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -661,6 +661,45 @@ async function renderOrganigramme() {
     </div>`;
   }
 
+  // ---- ④bis Ce que reçoit RÉELLEMENT chaque enfant (succession nette + AV nette) ----
+  // Révèle le vrai (dés)équilibre : un 1/3 d'AV paraît égalitaire mais, cumulé à la
+  // part de succession et sachant que l'AV est quasi-exonérée, il peut créer un
+  // favoritisme caché. Calcul selon la logique de décès (simulerDeces, ordre parent[0]).
+  let recapEnfants = "";
+  if (sim0 && enfants.length) {
+    const byNom = {};
+    enfants.forEach((e) => (byNom[e.nom] = { succ: 0, av: 0 }));
+    (sim0.premierDeces.partEnfants || []).forEach((r) => { if (byNom[r.nom]) byNom[r.nom].succ += r.net; });
+    (sim0.secondDeces.parEnfant || []).forEach((r) => { if (byNom[r.nom]) byNom[r.nom].succ += r.net; });
+    (d.avBeneficiaires || []).forEach((x) => { if (byNom[x.nom]) byNom[x.nom].av += x.net; });
+    const rowsR = enfants.map((e) => ({ nom: e.nom, succ: byNom[e.nom].succ, av: byNom[e.nom].av, total: byNom[e.nom].succ + byNom[e.nom].av }));
+    const totAll = rowsR.reduce((s, r) => s + r.total, 0);
+    const moy = rowsR.length ? totAll / rowsR.length : 0;
+    const maxT = Math.max(1, ...rowsR.map((r) => r.total));
+    const tMax = Math.max(...rowsR.map((r) => r.total)), tMin = Math.min(...rowsR.map((r) => r.total));
+    const ecart = tMax - tMin, ratio = moy > 0 ? ecart / moy : 0;
+    const plusServi = rowsR.find((r) => r.total === tMax), moinsServi = rowsR.find((r) => r.total === tMin);
+    const verdict = ratio < 0.05
+      ? `<span class="badge ok">Équilibré</span> les enfants reçoivent des montants nets comparables (écart ${eur(ecart)}).`
+      : `<span class="badge warn">Déséquilibre ${Math.round(ratio * 100)} %</span> <b>${plusServi.nom}</b> reçoit <b>${eur(ecart)}</b> net de plus que <b>${moinsServi.nom}</b> — souvent via l'assurance-vie (quasi-exonérée), un « favoritisme » invisible si on ne regarde que le 1/3 d'AV.`;
+    recapEnfants = `<div class="card">
+      <div class="section-head"><div><h2>⚖️ Ce que reçoit réellement chaque enfant</h2><div class="small muted">Net perçu = part de <b>succession</b> (après droits) + <b>assurance-vie</b> (après 990 I), selon l'ordre de décès (${parents.length > 1 ? parents[0].nom + " d'abord" : "parent seul"}). C'est ce total qui compte pour juger de l'équité, pas la clause d'AV seule.</div></div></div>
+      <div class="table-wrap"><table class="grid2">
+        <thead><tr><th>Enfant</th><th>Succession (net)</th><th>Assurance-vie (net)</th><th>TOTAL net perçu</th><th>Part</th><th></th></tr></thead>
+        <tbody>${rowsR.map((r) => `<tr>
+          <td><b>${r.nom}</b></td>
+          <td class="num">${eur(r.succ)}</td>
+          <td class="num">${eur(r.av)}</td>
+          <td class="num net"><b>${eur(r.total)}</b></td>
+          <td class="num">${totAll > 0 ? pct(r.total / totAll) : "—"}</td>
+          <td style="min-width:90px"><span class="track" style="display:inline-block;width:80px;height:8px;background:#eef2f7;border-radius:4px;overflow:hidden;vertical-align:middle"><span style="display:block;height:100%;width:${Math.round(r.total / maxT * 100)}%;background:${r.total === tMax && ratio >= 0.05 ? "var(--warn)" : "var(--accent-2)"}"></span></span></td>
+        </tr>`).join("")}</tbody>
+        <tfoot><tr><td>Total</td><td class="num">${eur(rowsR.reduce((s, r) => s + r.succ, 0))}</td><td class="num">${eur(rowsR.reduce((s, r) => s + r.av, 0))}</td><td class="num net"><b>${eur(totAll)}</b></td><td class="num">100 %</td><td></td></tr></tfoot>
+      </table></div>
+      <div class="small" style="margin-top:10px">${verdict}</div>
+    </div>`;
+  }
+
   // ---- ⑤ Fiche de synthèse ----
   const fiche = `<div class="card">
     <h2>💰 Synthèse des droits</h2>
@@ -769,6 +808,7 @@ async function renderOrganigramme() {
     ${brutNet}
     ${mirror}
     ${diptyque}
+    ${recapEnfants}
     ${fiche}
     ${avCard}
     ${scenarios}
