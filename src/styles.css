@@ -800,3 +800,14 @@ summary.csum .tot { margin-left: auto; font-weight: 600; color: var(--muted); }
 .optim-verdict .line { padding: 3px 0; }
 .optim-sugg { margin-top: 12px; background: linear-gradient(90deg, rgba(11, 159, 112, 0.06), #fafcff 40%); border: 1px solid #cdeae0; border-left: 4px solid var(--accent-2); border-radius: var(--radius); padding: 12px 14px; }
 .optim-sugg ul { line-height: 1.5; }
+/* Jauge des paliers d'assurance-vie (990 I) */
+.avg-list { margin-top: 14px; display: flex; flex-direction: column; gap: 14px; }
+.avg-wrap { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; background: var(--panel); }
+.avg-head { margin-bottom: 7px; }
+.avg-track { position: relative; display: flex; height: 16px; border-radius: 8px; overflow: hidden; background: #eef2f7; }
+.avg-seg { height: 100%; }
+.avg-seg.z0 { background: #cdeae0; }
+.avg-seg.z20 { background: #f6dfb4; }
+.avg-seg.z31 { background: #f3b8b0; }
+.avg-mark { position: absolute; top: -3px; bottom: -3px; width: 3px; background: #0f2747; border-radius: 2px; box-shadow: 0 0 0 2px #fff; }
+.avg-foot { margin-top: 6px; }

@@ -3,11 +3,11 @@
 //  Consomme debrief(state) + barèmes data.js. Zéro DOM.
 //  Tout est INDICATIF, à valider avec un notaire.
 // =============================================================
-import { debrief } from "./graph.js?v=66";
+import { debrief } from "./graph.js?v=67";
 import {
   ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70,
   BAREME_LIGNE_DIRECTE, calculDroits, tauxUsufruit,
-} from "./data.js?v=66";
+} from "./data.js?v=67";
 
 const PLAFOND_AV = AV_AVANT_70.abattement; // 152 500 € / bénéficiaire (990 I)
 
@@ -37,15 +37,24 @@ export function optimiserAV(state) {
   const parBenef = {};
   (D.avBeneficiaires || []).forEach((b) => { parBenef[b.nom] = (parBenef[b.nom] || 0) + (b.capital || 0); });
 
+  // Seuil de capital où la taxation passe de 20 % à 31,25 % (990 I) :
+  // abattement 152 500 € + 700 000 € de base à 20 % = 852 500 € de capital reçu.
+  const SEUIL_3125 = PLAFOND_AV + AV_AVANT_70.seuilTranche1;
+
   // Lignes par bénéficiaire présent + enfants sans AV (capacité libre)
   const noms = new Set([...Object.keys(parBenef), ...enfants.map((e) => e.nom)]);
   const lignes = [...noms].map((nom) => {
     const capital = parBenef[nom] || 0;
+    // Palier marginal actuel : franchise (≤152 500), 20 % (≤852 500), sinon 31,25 %
+    const palier = capital <= PLAFOND_AV ? "franchise" : capital <= SEUIL_3125 ? "20" : "31.25";
     return {
       nom, capital,
       plafond: PLAFOND_AV,
-      depassement: Math.max(0, capital - PLAFOND_AV),
-      capaciteLibre: Math.max(0, PLAFOND_AV - capital),
+      seuil3125: SEUIL_3125,
+      palier,
+      depassement: Math.max(0, capital - PLAFOND_AV),         // au-dessus de l'abattement (devient taxable)
+      capaciteLibre: Math.max(0, PLAFOND_AV - capital),        // reste avant de commencer à taxer (20 %)
+      capaciteAvant3125: Math.max(0, SEUIL_3125 - capital),    // reste avant de basculer à 31,25 % (« stop AV »)
       droits: droits990(capital),
       estHeritier: enfants.some((e) => e.nom === nom),
     };
@@ -79,7 +88,7 @@ export function optimiserAV(state) {
       });
     });
   }
-  return { lignes, droitsActuels, droitsCible, economie, perHead, suggestions, capitalTotal, nHeirs: heirs.length };
+  return { lignes, droitsActuels, droitsCible, economie, perHead, suggestions, capitalTotal, nHeirs: heirs.length, plafond: PLAFOND_AV, seuil3125: SEUIL_3125 };
 }
 
 // -------------------------------------------------------------

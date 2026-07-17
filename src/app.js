@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=66";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=66";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=66";
-import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine } from "./optim.js?v=66";
-import * as sync from "./sync.js?v=66";
-import { askAI } from "./ai.js?v=66";
+} from "./data.js?v=67";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=67";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=67";
+import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine } from "./optim.js?v=67";
+import * as sync from "./sync.js?v=67";
+import { askAI } from "./ai.js?v=67";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1909,22 +1909,42 @@ function renderOptimiseur() {
       <p class="muted small" style="margin-top:10px">⚠️ Tous les montants sont <b>indicatifs</b> et reposent sur des hypothèses (revalorisation, âges, ordre des décès). À valider avec un notaire.</p>
     </div>`;
 
-  // --- Carte AV : plafonds 990 I & reventilation
+  // --- Carte AV : plafonds 990 I, paliers 20 %/31,25 % & reventilation
+  // Badge du palier marginal actuel
+  const palierBadge = (p) => p === "franchise" ? '<span class="badge ok">franchise</span>' : p === "20" ? '<span class="badge" style="background:#fdf3e4;color:#96570a;border-color:#f3ddba">20 %</span>' : '<span class="badge" style="background:#ffe0dd;color:#b42318;border-color:#f3b8b0">31,25 %</span>';
+  // Jauge des 3 zones (franchise / 20 % / 31,25 %), échelle partagée pour comparer les têtes
+  const maxCap = Math.max(0, ...avOpt.lignes.map((l) => l.capital));
+  const gaugeMax = Math.max(avOpt.seuil3125 * 1.25, maxCap * 1.08, 1);
+  const w = (montant) => (montant / gaugeMax * 100).toFixed(1);
+  const gauge = (l) => `
+    <div class="avg-wrap">
+      <div class="avg-head"><b>${l.nom}</b> <span class="muted small">${eur2(l.capital)} reçu · palier ${palierBadge(l.palier)}</span></div>
+      <div class="avg-track">
+        <div class="avg-seg z0" style="width:${w(avOpt.plafond)}%"></div>
+        <div class="avg-seg z20" style="width:${w(AV_AVANT_70.seuilTranche1)}%"></div>
+        <div class="avg-seg z31" style="width:${(100 - w(avOpt.plafond) - w(AV_AVANT_70.seuilTranche1)).toFixed(1)}%"></div>
+        <div class="avg-mark" style="left:${Math.min(98.5, l.capital / gaugeMax * 100).toFixed(1)}%"></div>
+      </div>
+      <div class="avg-foot muted small">${l.capaciteAvant3125 > 0
+        ? `Reste <b style="color:var(--accent-2)">${eur2(l.capaciteAvant3125)}</b> de capital avant de basculer à <b>31,25 %</b> — au-delà, mieux vaut arrêter d'alimenter l'AV sur cette tête.`
+        : `<span style="color:var(--warn)">⚠️ Palier 31,25 % atteint</span> — chaque euro supplémentaire est taxé à 31,25 %. Stop AV recommandé sur cette tête (basculer sur une autre).`}</div>
+    </div>`;
   const avRows = avOpt.lignes.map((l) => `
     <tr>
       <td>${l.nom}${l.estHeritier ? "" : ' <span class="muted small">(hors héritiers)</span>'}</td>
       <td class="num">${eur2(l.capital)}</td>
-      <td class="num">${l.depassement > 0 ? `<span style="color:var(--warn)">+${eur2(l.depassement)}</span>` : `<span class="muted">—</span>`}</td>
-      <td class="num">${l.capaciteLibre > 0 ? `<span style="color:var(--accent-2)">${eur2(l.capaciteLibre)}</span>` : `<span class="muted">plein</span>`}</td>
+      <td>${palierBadge(l.palier)}</td>
+      <td class="num">${l.capaciteAvant3125 > 0 ? `<span style="color:var(--accent-2)">${eur2(l.capaciteAvant3125)}</span>` : `<span style="color:var(--warn)">0 €</span>`}</td>
       <td class="num droits">${eur2(l.droits)}</td>
     </tr>`).join("");
   const avCard = avOpt.lignes.length ? `
     <div class="card">
-      <h2>🛡️ Assurance-vie — plafonds & reventilation <span class="muted small">art. 990 I · 152 500 €/bénéficiaire</span></h2>
+      <h2>🛡️ Assurance-vie — paliers 990 I & reventilation <span class="muted small">abatt. 152 500 € · 20 % → 700 000 € · 31,25 % au-delà</span></h2>
       <div class="table-wrap"><table class="grid2">
-        <thead><tr><th>Bénéficiaire</th><th>Capital reçu (avant 70)</th><th>Au-dessus du plafond</th><th>Plafond libre</th><th>Droits</th></tr></thead>
+        <thead><tr><th>Bénéficiaire</th><th>Capital reçu (avant 70)</th><th>Palier marginal</th><th>Reste avant 31,25 %</th><th>Droits</th></tr></thead>
         <tbody>${avRows}</tbody>
       </table></div>
+      <div class="avg-list">${avOpt.lignes.filter((l) => l.estHeritier || l.capital > 0).map(gauge).join("")}</div>
       <div class="optim-verdict" style="margin-top:12px">
         <div class="line"><span>Droits AV actuels (répartition en place)</span><b>${eur2(avOpt.droitsActuels)}</b></div>
         <div class="line"><span>Droits AV si répartition optimale entre ${avOpt.nHeirs} enfant(s)</span><b>${eur2(avOpt.droitsCible)}</b></div>
