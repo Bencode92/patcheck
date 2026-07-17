@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=76";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=76";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=76";
-import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant } from "./optim.js?v=76";
-import * as sync from "./sync.js?v=76";
-import { askAI } from "./ai.js?v=76";
+} from "./data.js?v=77";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=77";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=77";
+import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant } from "./optim.js?v=77";
+import * as sync from "./sync.js?v=77";
+import { askAI } from "./ai.js?v=77";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1040,7 +1040,11 @@ function renderPatrimoine() {
     const bits = [];
     if (a.categorie === "immobilier" && a.prixAcq && a.valeur) bits.push(`Plus-value latente : <b>${eur(a.valeur - a.prixAcq)}</b> (achat ${eur(a.prixAcq)} → marché ${eur(a.valeur)})`);
     if ((a.categorie === "immobilier" || a.categorie === "sci") && a.surface && a.valeur) bits.push(`<b>${eur(Math.round(a.valeur / a.surface))}/m²</b> (${a.surface} m²)`);
-    if (a.categorie === "capitalisation") bits.push(`🏦 <b>Contrat de capitalisation</b> : contrairement à l'assurance-vie, il <b>ne se dénoue PAS</b> au décès — il <b>entre dans la succession</b> (taxé au barème ligne directe, abattement 100 000 €/parent/enfant, PAS d'abattement 152 500 €). L'héritier le <b>conserve avec son antériorité fiscale</b>. Démembrable comme un autre bien.`);
+    if (a.categorie === "capitalisation") {
+      bits.push(`🏦 <b>Contrat de capitalisation</b> : contrairement à l'assurance-vie, il <b>ne se dénoue PAS</b> au décès — il <b>entre dans la succession</b> (taxé au barème ligne directe, abattement 100 000 €/parent/enfant, PAS d'abattement 152 500 €). L'héritier le <b>conserve avec son antériorité fiscale</b>. Démembrable comme un autre bien.`);
+      if (detenteursDe(a.id).some((o) => o.d.droit !== "PP"))
+        bits.push(`⚠️ <b>Démembré</b> : au décès, la NP se consolide <b>sans droits</b> (art. 1133, plus-value DMTG exonérée). MAIS au <b>rachat futur par l'héritier</b>, la plus-value IR/PS se calcule sur la <b>valeur de la NP au jour de la donation</b> (BOI-RPPM-RCM-20-10-20-50 §225) — <b>pas de step-up</b> au décès : la fraction usufruit + la plus-value post-donation restent imposables. Point <b>non tranché</b> (QE Daubresse n°07190, 2026, sans réponse). <b>Convention de démembrement écrite indispensable</b> (rachats de l'usufruitier limités aux produits) — risque art. 774 bis / abus de droit. À valider notaire/fiscaliste.`);
+    }
     return bits.join(" · ");
   };
 
