@@ -794,3 +794,9 @@ summary.csum .tot { margin-left: auto; font-weight: 600; color: var(--muted); }
   .card { box-shadow: none; break-inside: avoid; }
   details { border: none; }
 }
+
+/* ---------- Optimiseur (aide à la décision) ---------- */
+.optim-verdict { background: linear-gradient(180deg, #fbfdff, #f4f8fe); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 12px 14px; }
+.optim-verdict .line { padding: 3px 0; }
+.optim-sugg { margin-top: 12px; background: linear-gradient(90deg, rgba(11, 159, 112, 0.06), #fafcff 40%); border: 1px solid #cdeae0; border-left: 4px solid var(--accent-2); border-radius: var(--radius); padding: 12px 14px; }
+.optim-sugg ul { line-height: 1.5; }

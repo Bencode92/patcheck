@@ -1,0 +1,193 @@
+// =============================================================
+//  Optimiseur — moteur d'aide à la décision (déterministe, pur)
+//  Consomme debrief(state) + barèmes data.js. Zéro DOM.
+//  Tout est INDICATIF, à valider avec un notaire.
+// =============================================================
+import { debrief } from "./graph.js?v=64";
+import {
+  ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70,
+  BAREME_LIGNE_DIRECTE, calculDroits, tauxUsufruit,
+} from "./data.js?v=64";
+
+const PLAFOND_AV = AV_AVANT_70.abattement; // 152 500 € / bénéficiaire (990 I)
+
+// Droits 990 I sur un capital reçu par UN bénéficiaire (après abattement 152 500 €)
+export function droits990(capital) {
+  const base = Math.max(0, (capital || 0) - PLAFOND_AV);
+  const t1 = Math.min(base, AV_AVANT_70.seuilTranche1);
+  const t2 = Math.max(0, base - AV_AVANT_70.seuilTranche1);
+  return Math.round(t1 * AV_AVANT_70.tauxTranche1 + t2 * AV_AVANT_70.tauxTranche2);
+}
+
+// Droits ligne directe sur une base TOTALE répartie entre nEnfants (abattement /enfant)
+function droitsLD(baseTotale, abattParEnfant, nEnfants) {
+  const n = Math.max(1, nEnfants);
+  const parEnfant = Math.max(0, baseTotale / n - abattParEnfant);
+  return calculDroits(parEnfant, BAREME_LIGNE_DIRECTE) * n;
+}
+
+// -------------------------------------------------------------
+// 1) Assurance-vie — plafonds 990 I & reventilation suggérée
+// -------------------------------------------------------------
+export function optimiserAV(state) {
+  const D = debrief(state);
+  const personnes = state.personnes || [];
+  const enfants = personnes.filter((p) => p.role === "enfant");
+  // Capital 990 I (primes avant 70) par bénéficiaire, déjà agrégé par debrief
+  const parBenef = {};
+  (D.avBeneficiaires || []).forEach((b) => { parBenef[b.nom] = (parBenef[b.nom] || 0) + (b.capital || 0); });
+
+  // Lignes par bénéficiaire présent + enfants sans AV (capacité libre)
+  const noms = new Set([...Object.keys(parBenef), ...enfants.map((e) => e.nom)]);
+  const lignes = [...noms].map((nom) => {
+    const capital = parBenef[nom] || 0;
+    return {
+      nom, capital,
+      plafond: PLAFOND_AV,
+      depassement: Math.max(0, capital - PLAFOND_AV),
+      capaciteLibre: Math.max(0, PLAFOND_AV - capital),
+      droits: droits990(capital),
+      estHeritier: enfants.some((e) => e.nom === nom),
+    };
+  }).sort((a, b) => b.capital - a.capital);
+
+  const droitsActuels = lignes.reduce((s, l) => s + l.droits, 0);
+
+  // Cible = répartition optimale du capital 990 I total entre les enfants héritiers.
+  // droits990 est convexe → la répartition égale minimise la somme des droits.
+  const heirs = enfants.map((e) => e.nom);
+  const capitalTotal = lignes.reduce((s, l) => s + l.capital, 0);
+  let droitsCible = droitsActuels, perHead = 0;
+  if (heirs.length) {
+    perHead = capitalTotal / heirs.length;
+    droitsCible = heirs.length * droits990(perHead);
+  }
+  const economie = Math.max(0, droitsActuels - droitsCible);
+
+  // Suggestions concrètes : des saturés vers les héritiers à capacité libre
+  const satures = lignes.filter((l) => l.depassement > 0);
+  const libres = lignes.filter((l) => l.estHeritier && l.capaciteLibre > 0).sort((a, b) => b.capaciteLibre - a.capaciteLibre);
+  const suggestions = [];
+  if (economie > 0 && satures.length && libres.length) {
+    satures.forEach((s) => {
+      let reste = s.depassement;
+      libres.forEach((l) => {
+        if (reste <= 0 || l.capaciteLibre <= 0) return;
+        const mv = Math.min(reste, l.capaciteLibre);
+        suggestions.push(`Réorienter <b>${eurTxt(mv)}</b> de capital 990 I aujourd'hui destiné à <b>${s.nom}</b> (plafond saturé) vers un contrat au bénéfice de <b>${l.nom}</b> (plafond libre à ${eurTxt(l.capaciteLibre)}).`);
+        reste -= mv; l.capaciteLibre -= mv;
+      });
+    });
+  }
+  return { lignes, droitsActuels, droitsCible, economie, perHead, suggestions, capitalTotal, nHeirs: heirs.length };
+}
+
+// -------------------------------------------------------------
+// 2) Démembrement — donner la NP maintenant vs attendre 15 ans vs succession
+//    actif : { libelle, valeurNette, dutreil }
+//    params: { revaloPct, esperance, ageParent, nbParents, nbEnfants,
+//              abattParEnfantNow, fractionAOffrir }
+// -------------------------------------------------------------
+export function arbitrageDemembrement(actif, p) {
+  const revalo = 1 + (Number(p.revaloPct) || 0) / 100;
+  const frac = Math.min(1, Math.max(0, Number(p.fractionAOffrir) || 1));
+  const dutreilFactor = actif.dutreil ? 0.25 : 1; // −75 % d'assiette si pacte
+  const nEnf = Math.max(1, p.nbEnfants || 1);
+  const abattFrais = ABATTEMENTS.enfant * Math.max(1, p.nbParents || 1); // rechargé /enfant
+  const abattNow = p.abattParEnfantNow != null ? p.abattParEnfantNow : abattFrais;
+
+  // MAINTENANT — donation de la nue-propriété (le parent garde l'usufruit/contrôle)
+  const npNow = 1 - tauxUsufruit(p.ageParent);
+  const offerteNow = actif.valeurNette * frac;
+  const baseNow = offerteNow * npNow * dutreilFactor;
+  const droitsNow = droitsLD(baseNow, abattNow, nEnf);
+
+  // ATTENDRE 15 ANS — bien revalorisé, parent plus âgé (NP plus grosse), abattement rechargé
+  const valeur15 = actif.valeurNette * Math.pow(revalo, DELAI_RAPPEL_ANS);
+  const npFut = 1 - tauxUsufruit(p.ageParent + DELAI_RAPPEL_ANS);
+  const offerteFut = valeur15 * frac;
+  const baseFut = offerteFut * npFut * dutreilFactor;
+  const droitsWait = droitsLD(baseFut, abattFrais, nEnf);
+  const risqueDeces = p.esperance != null && p.ageParent + DELAI_RAPPEL_ANS > p.esperance;
+
+  // NE RIEN FAIRE — succession à l'espérance de vie : PLEINE valeur revalorisée taxée
+  const anneesDeces = Math.max(0, (p.esperance || p.ageParent) - p.ageParent);
+  const valeurDeces = actif.valeurNette * Math.pow(revalo, anneesDeces) * frac;
+  const baseDeces = valeurDeces * dutreilFactor; // pleine propriété transmise
+  const droitsDeces = droitsLD(baseDeces, abattFrais, nEnf);
+
+  const scores = { maintenant: droitsNow, attendre: droitsWait, succession: droitsDeces };
+  const best = Object.keys(scores).reduce((a, b) => (scores[a] <= scores[b] ? a : b));
+
+  // Purge par tranches : combien d'opérations de 15 ans pour tout transmettre
+  const ops = frac > 0 ? Math.ceil(1 / frac) : 0;
+
+  return {
+    actif: { libelle: actif.libelle, valeurNette: actif.valeurNette, dutreil: actif.dutreil },
+    frac,
+    maintenant: { valeurOfferte: offerteNow, npFrac: npNow, base: baseNow, droits: droitsNow, net: offerteNow - droitsNow },
+    attendre: { valeurOfferte: offerteFut, npFrac: npFut, base: baseFut, droits: droitsWait, net: offerteFut - droitsWait, valeurFuture: valeur15, risqueDeces },
+    succession: { valeur: valeurDeces, base: baseDeces, droits: droitsDeces, net: valeurDeces - droitsDeces },
+    best,
+    deltaAttendreVsMaintenant: droitsWait - droitsNow,
+    deltaMaintenantVsSuccession: droitsDeces - droitsNow,
+    tranches: { ops, fraction: frac },
+  };
+}
+
+// -------------------------------------------------------------
+// 3) Timing des donations — abattement dispo & prochaine recharge
+// -------------------------------------------------------------
+export function timingDonations(state) {
+  const D = debrief(state);
+  const donations = state.donations || [];
+  const personnes = state.personnes || [];
+  const nom = (id) => personnes.find((p) => p.id === id)?.nom || id;
+  const anneesEcoulees = (d) => (new Date() - new Date(d)) / (365.25 * 864e5);
+
+  // Prochaine recharge par couple (donateur→bénéficiaire) = don le plus ANCIEN < 15 ans + 15 ans
+  const rechargeParCouple = {};
+  donations.forEach((d) => {
+    const ecoule = anneesEcoulees(d.date);
+    if (ecoule >= DELAI_RAPPEL_ANS) return;
+    const key = `${nom(d.donateurId)}→${nom(d.beneficiaireId)}`;
+    const an = new Date(d.date).getFullYear() + DELAI_RAPPEL_ANS;
+    if (!rechargeParCouple[key] || an < rechargeParCouple[key]) rechargeParCouple[key] = an;
+  });
+
+  const rows = (D.abatt || []).map((a) => {
+    const key = `${a.parent}→${a.enfant}`;
+    return {
+      parent: a.parent, enfant: a.enfant,
+      consomme: a.consomme, restant: a.restant,
+      prochaineRecharge: rechargeParCouple[key] || null, // null = abattement plein, dispo tout de suite
+    };
+  }).sort((x, y) => y.restant - x.restant);
+
+  return { rows, capaciteExoneree: D.capaciteExoneree };
+}
+
+// -------------------------------------------------------------
+// 4) Synthèse — cockpit : droits aujourd'hui + leviers classés
+// -------------------------------------------------------------
+export function syntheseOptim(state, params = {}) {
+  const D = debrief(state);
+  const av = optimiserAV(state);
+
+  // Levier démembrement : gain total si TOUS les biens PP parents sont démembrés
+  // maintenant (donation NP) plutôt que laissés à la succession. Import différé
+  // pour éviter la dépendance circulaire dure au chargement.
+  const leviers = [];
+  if (av.economie > 0)
+    leviers.push({ nom: "Reventiler les bénéficiaires d'assurance-vie", economie: av.economie });
+
+  return {
+    droitsAujourdhui: D.totalDroitsTous || 0,
+    capaciteExoneree: D.capaciteExoneree || 0,
+    leviers, // le levier démembrement (dépend des curseurs) est ajouté côté UI
+    av,
+  };
+}
+
+// util local (formatage euro pour les suggestions HTML)
+function eurTxt(n) { return Math.round(n || 0).toLocaleString("fr-FR") + " €"; }

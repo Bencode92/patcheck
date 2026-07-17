@@ -1,7 +1,7 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=63";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=64";
 
 // Année de naissance : la DATE complète prime (plus précise), puis année seule, puis âge
 function birthYear(p) {
@@ -433,6 +433,50 @@ export function debrief(state) {
     nbParents: parents.length,
     nbEnfants: enfants.length,
   };
+}
+
+// ------------------- Biens transmissibles nets (pour l'Optimiseur) -------------------
+// Liste, par ACTIF détenu en pleine propriété par les PARENTS, la valeur NETTE
+// (valeur marchande − dette adossée) × quote-part parents. Sert de base à
+// l'arbitrage démembrement (donner la nue-propriété). Réutilise le netting dette.
+export function actifsTransmissiblesParents(state) {
+  const personnes = state.personnes || [];
+  const actifs = state.actifs || [];
+  const detentions = state.detentions || [];
+  const dettes = state.dettes || [];
+  const parents = personnes.filter((p) => p.role === "parent");
+  const parentIds = new Set(parents.map((p) => p.id));
+  const CATS = new Set(["sci", "immobilier", "entreprise", "titres"]);
+  // Parts en % (gère les fractions saisies « 81/500 »)
+  const partNum = (v) => {
+    if (typeof v === "string" && v.includes("/")) { const [x, y] = v.split("/").map(Number); return y ? (x / y) * 100 : 0; }
+    return Number(v) || 0;
+  };
+  // Dette adossée par actif
+  const detteParActif = {};
+  dettes.forEach((x) => { if (actifs.some((a) => a.id === x.cible)) detteParActif[x.cible] = (detteParActif[x.cible] || 0) + (Number(x.montant) || 0); });
+  // Âge du plus jeune parent aujourd'hui (l'usufruit dure jusqu'au dernier décès)
+  const agesParents = parents.map((p) => ageDePers(p)).filter((x) => x != null);
+  const ageUsufruitierAujourdhui = agesParents.length ? Math.min(...agesParents) : 65;
+  // Agrège les quotes-parts PP des parents par actif
+  const parActif = {};
+  detentions.forEach((d) => {
+    if (d.droit !== "PP" || !parentIds.has(d.proprietaire)) return;
+    const a = actifs.find((z) => z.id === d.actifRef);
+    if (!a || !CATS.has(a.categorie)) return;
+    parActif[a.id] = (parActif[a.id] || 0) + partNum(d.part);
+  });
+  return Object.entries(parActif).map(([id, partPct]) => {
+    const a = actifs.find((z) => z.id === id);
+    const valeurPleine = Math.max(0, (Number(a.valeur) || 0) - (detteParActif[id] || 0));
+    return {
+      id, libelle: a.libelle || id, categorie: a.categorie,
+      valeurBrute: (Number(a.valeur) || 0) * partPct / 100,
+      dette: (detteParActif[id] || 0) * partPct / 100,
+      valeurNette: valeurPleine * partPct / 100,
+      partPct, dutreil: !!a.dutreil, ageUsufruitierAujourdhui,
+    };
+  }).filter((x) => x.valeurNette > 0);
 }
 
 // ------------------- Simulation « décès par parent » (ordre des décès) -------------------

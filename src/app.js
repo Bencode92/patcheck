@@ -2,11 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=63";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=63";
-import { buildMermaid, debrief, simulerDeces } from "./graph.js?v=63";
-import * as sync from "./sync.js?v=63";
-import { askAI } from "./ai.js?v=63";
+} from "./data.js?v=64";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=64";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=64";
+import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim } from "./optim.js?v=64";
+import * as sync from "./sync.js?v=64";
+import { askAI } from "./ai.js?v=64";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -190,6 +191,7 @@ function simulerAvAvant70(montant) {
 const TABS = [
   { id: "organigramme", label: "🏠 Résumé patrimonial" },
   { id: "conseil", label: "🤖 Conseil & optimisation" },
+  { id: "optimiseur", label: "🎯 Optimiseur" },
   { id: "famille", label: "👪 Famille" },
   { id: "patrimoine", label: "🏦 Patrimoine" },
   { id: "entreprise", label: "🏭 Entreprise" },
@@ -223,6 +225,7 @@ function render() {
     donnees: renderDonnees,
     organigramme: renderOrganigramme,
     conseil: renderConseil,
+    optimiseur: renderOptimiseur,
     famille: renderFamille,
     patrimoine: renderPatrimoine,
     entreprise: renderEntreprise,
@@ -1860,6 +1863,152 @@ Sois concret et chiffré.`;
   $("#chat_send").addEventListener("click", () => send());
   $("#chat_in").addEventListener("keydown", (e2) => { if (e2.key === "Enter" && (e2.metaKey || e2.ctrlKey)) send(); });
   $$("#tab-content .suggest").forEach((b) => b.addEventListener("click", () => send(b.textContent)));
+}
+
+// ---------- Onglet Optimiseur (moteur d'aide à la décision) ----------
+function renderOptimiseur() {
+  const c = $("#tab-content");
+  const d = debrief(state);
+  const eur2 = (n) => Math.round(n || 0).toLocaleString("fr-FR") + " €";
+  const P = parents(), E = enfants();
+  const nbParents = Math.max(1, P.length), nbEnfants = Math.max(1, E.length);
+  const agesP = P.map(ageDe).filter((x) => x != null);
+  const ageParentDefaut = agesP.length ? Math.min(...agesP) : 62;
+  const espDefaut = 90;
+
+  // Abattement moyen encore disponible par enfant (aujourd'hui)
+  const perEnf = {}; E.forEach((e) => (perEnf[e.nom] = 0));
+  (d.abatt || []).forEach((a) => { if (perEnf[a.enfant] != null) perEnf[a.enfant] += a.restant; });
+  const valsAb = Object.values(perEnf);
+  const abattParEnfantNow = valsAb.length ? valsAb.reduce((s, x) => s + x, 0) / valsAb.length : ABATTEMENTS.enfant * nbParents;
+
+  const avOpt = optimiserAV(state);
+  const timing = timingDonations(state);
+  const biens = actifsTransmissiblesParents(state);
+
+  // Potentiel « démembrer maintenant » (défaut : revalo 2 %, espérance 90, tout le bien)
+  let potDemem = 0;
+  biens.forEach((b) => {
+    const r = arbitrageDemembrement(b, { revaloPct: 2, esperance: espDefaut, ageParent: b.ageUsufruitierAujourdhui, nbParents, nbEnfants, abattParEnfantNow, fractionAOffrir: 1 });
+    potDemem += Math.max(0, r.succession.droits - r.maintenant.droits);
+  });
+
+  const leviers = [...syntheseOptim(state).leviers];
+  if (potDemem > 0) leviers.push({ nom: "Démembrer (donner la nue-propriété) maintenant plutôt qu'à la succession", economie: potDemem });
+  leviers.sort((a, b) => b.economie - a.economie);
+  const economiePotentielle = leviers.reduce((s, l) => s + l.economie, 0);
+
+  // --- Cockpit synthèse
+  const cockpit = `
+    <div class="card">
+      <h2>🎯 Optimiseur — aide à la décision <span class="muted small">déterministe, chiffré</span></h2>
+      <div class="cockpit" style="grid-template-columns:repeat(3,1fr)">
+        <div class="kpi2 alert"><div class="lbl">Droits estimés aujourd'hui</div><div class="val num">${eur2(d.totalDroitsTous)}</div></div>
+        <div class="kpi2 good"><div class="lbl">Économie potentielle identifiée</div><div class="val num">${eur2(economiePotentielle)}</div></div>
+        <div class="kpi2"><div class="lbl">Donnable en franchise (abattements)</div><div class="val num">${eur2(d.capaciteExoneree)}</div></div>
+      </div>
+      ${leviers.length ? `<div class="optim-verdict"><b>Leviers classés par gain :</b><ol style="margin:8px 0 0;padding-left:20px">${leviers.map((l) => `<li>${l.nom} — <b style="color:var(--accent-2)">${eur2(l.economie)}</b></li>`).join("")}</ol></div>` : `<p class="muted small">Aucun levier chiffrable détecté sur les données actuelles.</p>`}
+      <p class="muted small" style="margin-top:10px">⚠️ Tous les montants sont <b>indicatifs</b> et reposent sur des hypothèses (revalorisation, âges, ordre des décès). À valider avec un notaire.</p>
+    </div>`;
+
+  // --- Carte AV : plafonds 990 I & reventilation
+  const avRows = avOpt.lignes.map((l) => `
+    <tr>
+      <td>${l.nom}${l.estHeritier ? "" : ' <span class="muted small">(hors héritiers)</span>'}</td>
+      <td class="num">${eur2(l.capital)}</td>
+      <td class="num">${l.depassement > 0 ? `<span style="color:var(--warn)">+${eur2(l.depassement)}</span>` : `<span class="muted">—</span>`}</td>
+      <td class="num">${l.capaciteLibre > 0 ? `<span style="color:var(--accent-2)">${eur2(l.capaciteLibre)}</span>` : `<span class="muted">plein</span>`}</td>
+      <td class="num droits">${eur2(l.droits)}</td>
+    </tr>`).join("");
+  const avCard = avOpt.lignes.length ? `
+    <div class="card">
+      <h2>🛡️ Assurance-vie — plafonds & reventilation <span class="muted small">art. 990 I · 152 500 €/bénéficiaire</span></h2>
+      <div class="table-wrap"><table class="grid2">
+        <thead><tr><th>Bénéficiaire</th><th>Capital reçu (avant 70)</th><th>Au-dessus du plafond</th><th>Plafond libre</th><th>Droits</th></tr></thead>
+        <tbody>${avRows}</tbody>
+      </table></div>
+      <div class="optim-verdict" style="margin-top:12px">
+        <div class="line"><span>Droits AV actuels (répartition en place)</span><b>${eur2(avOpt.droitsActuels)}</b></div>
+        <div class="line"><span>Droits AV si répartition optimale entre ${avOpt.nHeirs} enfant(s)</span><b>${eur2(avOpt.droitsCible)}</b></div>
+        <div class="line total"><span>Économie possible en reventilant</span><b style="color:var(--accent-2)">${eur2(avOpt.economie)}</b></div>
+      </div>
+      ${avOpt.suggestions.length ? `<div class="optim-sugg"><b>💡 Reventilation suggérée</b><ul style="margin:6px 0 0;padding-left:20px">${avOpt.suggestions.map((s) => `<li>${s}</li>`).join("")}</ul><p class="muted small" style="margin-top:8px">Reventiler = modifier la <b>clause bénéficiaire</b> auprès de l'assureur (souscrire/répartir sur d'autres têtes). À faire par écrit, à valider.</p></div>` : (avOpt.economie <= 0 ? `<p class="muted small" style="margin-top:8px">✅ Répartition déjà efficace : aucun bénéficiaire ne dépasse le plafond de façon coûteuse.</p>` : "")}
+    </div>` : `
+    <div class="card"><h2>🛡️ Assurance-vie — plafonds</h2><p class="muted">Aucun capital d'assurance-vie « avant 70 ans » (990 I) avec bénéficiaire renseigné. Renseigne tes contrats dans l'onglet Assurance-vie.</p></div>`;
+
+  // --- Carte démembrement : maintenant vs 15 ans vs succession
+  const dememCard = biens.length ? `
+    <div class="card">
+      <h2>🏛️ Démembrement — donner la nue-propriété : maintenant vs attendre 15 ans</h2>
+      <p class="muted small">Compare, pour un bien détenu en pleine propriété par les parents : donner la <b>nue-propriété</b> aujourd'hui (le parent garde l'usufruit et le contrôle), l'<b>attendre 15 ans</b> (abattement rechargé mais NP plus grosse + bien revalorisé), ou <b>ne rien faire</b> (succession en pleine propriété). Barème 669 selon l'âge.</p>
+      <div class="form-row">
+        <label>Bien
+          <select id="o_bien">${biens.map((b, i) => `<option value="${b.id}" ${i === 0 ? "selected" : ""}>${b.libelle} — net ${eur2(b.valeurNette)}${b.dutreil ? " · Dutreil" : ""}</option>`).join("")}</select>
+        </label>
+        <label>Fraction à donner (%)<input type="number" id="o_frac" value="10" min="1" max="100" step="5"></label>
+      </div>
+      <div class="form-row">
+        <label>Âge de l'usufruitier<input type="number" id="o_age" value="${ageParentDefaut}" min="30" max="100"></label>
+        <label>Revalorisation du bien (%/an)<input type="number" id="o_revalo" value="2" min="0" max="10" step="0.5"></label>
+        <label>Espérance de vie (âge)<input type="number" id="o_esp" value="${espDefaut}" min="70" max="105"></label>
+      </div>
+      <button id="o_go" class="btn primary">Comparer les 3 voies</button>
+      <div id="o_result"></div>
+    </div>` : `
+    <div class="card"><h2>🏛️ Démembrement</h2><p class="muted">Aucun bien détenu en pleine propriété par les parents (SCI, immobilier, entreprise, titres) à démembrer. Saisis-les dans l'onglet Patrimoine.</p></div>`;
+
+  // --- Carte timing donations
+  const timingRows = timing.rows.map((r) => `
+    <tr>
+      <td>${r.parent} → ${r.enfant}</td>
+      <td class="num">${eur2(r.consomme)}</td>
+      <td class="num ${r.restant > 0 ? "net" : ""}">${eur2(r.restant)}</td>
+      <td class="num">${r.prochaineRecharge ? r.prochaineRecharge : '<span style="color:var(--accent-2)">disponible</span>'}</td>
+    </tr>`).join("");
+  const timingCard = timing.rows.length ? `
+    <div class="card">
+      <h2>🎁 Fenêtres de donation — abattements 100 000 € /15 ans</h2>
+      <div class="table-wrap"><table class="grid2">
+        <thead><tr><th>Donateur → enfant</th><th>Déjà donné (&lt;15 ans)</th><th>Encore en franchise</th><th>Prochaine recharge</th></tr></thead>
+        <tbody>${timingRows}</tbody>
+      </table></div>
+      <p class="muted small" style="margin-top:8px">Total transmissible en franchise dès maintenant : <b style="color:var(--accent-2)">${eur2(timing.capaciteExoneree)}</b>. Chaque fenêtre « disponible » gagne à être ouverte tôt (le compteur des 15 ans redémarre à la donation).</p>
+    </div>` : "";
+
+  c.innerHTML = cockpit + avCard + dememCard + timingCard;
+
+  // --- Interaction démembrement
+  if (biens.length) {
+    const run = () => {
+      const bien = biens.find((b) => b.id === $("#o_bien").value) || biens[0];
+      const r = arbitrageDemembrement(bien, {
+        revaloPct: parseNum($("#o_revalo").value),
+        esperance: parseNum($("#o_esp").value),
+        ageParent: parseNum($("#o_age").value),
+        nbParents, nbEnfants, abattParEnfantNow,
+        fractionAOffrir: parseNum($("#o_frac").value) / 100,
+      });
+      const nomVoie = { maintenant: "Donner la NP maintenant", attendre: "Attendre 15 ans", succession: "Ne rien faire (succession)" };
+      const eco = (voie, x) => r.best === voie ? '<span class="badge ok">le moins coûteux</span>' : `<span class="muted small">+${eur2(x - (r.best === "maintenant" ? r.maintenant.droits : r.best === "attendre" ? r.attendre.droits : r.succession.droits))}</span>`;
+      $("#o_result").innerHTML = `
+        <div class="table-wrap" style="margin-top:12px"><table class="grid2">
+          <thead><tr><th>Voie</th><th>Base taxable</th><th>Droits estimés</th><th>Fraction NP</th><th></th></tr></thead>
+          <tbody>
+            <tr><td><b>${nomVoie.maintenant}</b><br><span class="muted small">Parent ${parseNum($("#o_age").value)} ans · garde l'usufruit et le contrôle${bien.dutreil ? " · Dutreil −75 %" : ""}</span></td><td class="num">${eur2(r.maintenant.base)}</td><td class="num droits">${eur2(r.maintenant.droits)}</td><td class="num">${pct(r.maintenant.npFrac)}</td><td>${eco("maintenant", r.maintenant.droits)}</td></tr>
+            <tr><td><b>${nomVoie.attendre}</b><br><span class="muted small">Parent ${parseNum($("#o_age").value) + 15} ans · bien revalorisé · abattement rechargé${r.attendre.risqueDeces ? ' · <span style="color:var(--warn)">⚠️ au-delà de l\'espérance de vie</span>' : ""}</span></td><td class="num">${eur2(r.attendre.base)}</td><td class="num droits">${eur2(r.attendre.droits)}</td><td class="num">${pct(r.attendre.npFrac)}</td><td>${eco("attendre", r.attendre.droits)}</td></tr>
+            <tr><td><b>${nomVoie.succession}</b><br><span class="muted small">Pleine propriété transmise au décès${bien.dutreil ? " · Dutreil −75 %" : ""}</span></td><td class="num">${eur2(r.succession.base)}</td><td class="num droits">${eur2(r.succession.droits)}</td><td class="num">100 %</td><td>${eco("succession", r.succession.droits)}</td></tr>
+          </tbody>
+        </table></div>
+        <div class="optim-verdict" style="margin-top:10px">
+          <b>Verdict :</b> la voie <b>« ${nomVoie[r.best]} »</b> minimise les droits.
+          ${r.deltaMaintenantVsSuccession > 0 ? `Donner la NP maintenant économise <b style="color:var(--accent-2)">${eur2(r.deltaMaintenantVsSuccession)}</b> vs ne rien faire.` : ""}
+          ${r.frac < 1 ? ` Avec une fraction de ${pct(r.frac)}, il faudrait ~<b>${r.tranches.ops}</b> opération(s) espacées de 15 ans pour transmettre tout le bien en purgeant les abattements.` : ""}
+        </div>
+        <p class="muted small" style="margin-top:6px">💡 Le démembrement ne taxe que la nue-propriété (fraction 669) et gèle la valeur transmise : la revalorisation future échappe aux droits. Le parent conserve les revenus et le contrôle via l'usufruit. À valider avec un notaire.</p>`;
+    };
+    $("#o_go").addEventListener("click", run);
+    run();
+  }
 }
 
 // ---------- Onglet Par banque / établissement ----------
