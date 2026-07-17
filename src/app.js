@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=69";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=69";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=69";
-import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine } from "./optim.js?v=69";
-import * as sync from "./sync.js?v=69";
-import { askAI } from "./ai.js?v=69";
+} from "./data.js?v=70";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=70";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=70";
+import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine } from "./optim.js?v=70";
+import * as sync from "./sync.js?v=70";
+import { askAI } from "./ai.js?v=70";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1521,8 +1521,14 @@ function renderAv() {
             ${a.clauseType === "conjoint_defaut_enfants" ? '<span class="muted small">Au 1ᵉʳ décès : le <b>conjoint</b> reçoit → <b>0 € de droits</b> (exonéré). Les enfants ne sont taxés qu\'au <b>2ᵈ décès</b> (à défaut).</span>' : ""}
           </label>
           <div class="benef-row"><span class="muted small">Bénéficiaires${a.clauseType === "conjoint_defaut_enfants" ? " « à défaut » (si le conjoint n'est plus là)" : ""} :</span> ${benefBoxes(a, i)}
-            <button class="av_equal btn small" data-i="${i}">répartir également</button>
+            <button class="av_equal btn small" data-i="${i}">parts égales exactes</button>
+            ${(a.beneficiaires || []).length > 1 && (!a.repartition || Object.keys(a.repartition).length === 0)
+              ? `<span class="badge ok" title="Répartition vide = division exacte en 1/n, sans arrondi">⚖️ parts égales (${(100 / a.beneficiaires.length).toFixed(1).replace(".", ",")} % chacun)</span>`
+              : ""}
           </div>
+          ${(a.beneficiaires || []).length > 1 && a.repartition && Object.keys(a.repartition).length
+            ? `<div class="muted small" style="margin-top:4px">💡 Répartition personnalisée saisie. Pour un tiers <b>exact</b> sans favoritisme (l'AV étant peu taxée, +1 % avantage réellement une tête), clique « parts égales exactes » — ça vide les % et divise en ${(100 / a.beneficiaires.length).toFixed(1).replace(".", ",")} % pile.</div>`
+            : ""}
           <label style="display:block;margin-top:10px" class="muted small">Clause bénéficiaire (texte exact du contrat)
             <textarea class="av_clause" data-i="${i}" rows="2" placeholder="ex : mon conjoint, à défaut mes enfants nés ou à naître, vivants ou représentés, par parts égales, à défaut mes héritiers">${a.clause || ""}</textarea>
           </label>
@@ -1588,9 +1594,9 @@ function renderAv() {
     const i = +btn.dataset.i;
     const bens = AV[i].beneficiaires || [];
     if (!bens.length) return;
-    const part = Math.floor((100 / bens.length) * 10) / 10;
-    AV[i].repartition = {};
-    bens.forEach((pid, k) => (AV[i].repartition[pid] = k === bens.length - 1 ? +(100 - part * (bens.length - 1)).toFixed(1) : part));
+    // Parts égales EXACTES : on efface toute répartition → le moteur divise en 1/n
+    // (33,333 % pile pour 3 enfants), sans arrondi qui avantagerait une tête.
+    delete AV[i].repartition;
     save();
     renderAv();
   }));
