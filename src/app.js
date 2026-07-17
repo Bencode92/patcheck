@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=72";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=72";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=72";
-import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant } from "./optim.js?v=72";
-import * as sync from "./sync.js?v=72";
-import { askAI } from "./ai.js?v=72";
+} from "./data.js?v=73";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=73";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=73";
+import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant } from "./optim.js?v=73";
+import * as sync from "./sync.js?v=73";
+import { askAI } from "./ai.js?v=73";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -769,6 +769,13 @@ async function renderOrganigramme() {
       ${capes.length
         ? `<div class="small" style="margin-top:10px"><span class="badge warn">Plafond 20 % dépassé</span> ${capes.map((r) => `<b>${r.enfant}</b> (via ${r.assure})`).join(", ")} bascule(nt) à <b>31,25 %</b> — chaque euro d'AV supplémentaire de cet assuré vers cet enfant est taxé à 31,25 %. Réoriente vers un enfant/assuré au plafond libre.</div>`
         : `<div class="small muted" style="margin-top:10px">✅ Aucune jambe assuré→enfant ne dépasse le plafond des 20 % — tout ton capital 990 I reste dans la tranche à 20 %.</div>`}
+      <div class="fiche" style="margin-top:12px">
+        <div class="row"><span class="k">Total de tes contrats d'assurance-vie (saisis)</span><span class="v num">${eur(avPA.totalAvGlobal)}</span></div>
+        <div class="row sub"><span class="k">✅ couvert ici : avant 70 ans (990 I), vers les enfants</span><span class="v num">${eur(avPA.totalCouvert)}</span></div>
+        ${avPA.apres70 > 0 ? `<div class="row sub"><span class="k">↪ après 70 ans (757 B, autre régime — non affiché ici)</span><span class="v num">${eur(avPA.apres70)}</span></div>` : ""}
+        ${avPA.versAutres > 0 ? `<div class="row sub"><span class="k">↪ part vers le conjoint / autres bénéficiaires</span><span class="v num">${eur(avPA.versAutres)}</span></div>` : ""}
+        ${avPA.sansBeneficiaire > 0 ? `<div class="row sub"><span class="k">⚠️ contrats sans bénéficiaire renseigné</span><span class="v num" style="color:var(--warn)">${eur(avPA.sansBeneficiaire)}</span></div>` : ""}
+      </div>
       <p class="small muted" style="margin-top:8px">ℹ️ Cette vue <b>par assuré</b> est la plus juste fiscalement (chaque parent = abattement + tranche 20 % distincts). Le « Total droits AV » de la synthèse, lui, agrège par bénéficiaire — estimation <b>prudente</b> (souvent plus élevée) quand deux parents assurent le même enfant.</p>
     </div>`;
   }

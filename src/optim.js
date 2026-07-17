@@ -3,11 +3,11 @@
 //  Consomme debrief(state) + barèmes data.js. Zéro DOM.
 //  Tout est INDICATIF, à valider avec un notaire.
 // =============================================================
-import { debrief, avAvant70Effectif } from "./graph.js?v=72";
+import { debrief, avAvant70Effectif } from "./graph.js?v=73";
 import {
   ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70,
   BAREME_LIGNE_DIRECTE, calculDroits, tauxUsufruit,
-} from "./data.js?v=72";
+} from "./data.js?v=73";
 
 const PLAFOND_AV = AV_AVANT_70.abattement; // 152 500 € / bénéficiaire (990 I)
 
@@ -101,33 +101,41 @@ export function avParAssureEnfant(state) {
   const estEnfant = (id) => enfants.some((e) => e.id === id);
   const nom = (id) => personnes.find((p) => p.id === id)?.nom || id;
   const legs = {}; // "assuré|enfantId" -> capital 990 I
+  // Réconciliation avec le TOTAL des contrats saisis (pour ne rien masquer)
+  let totalAvGlobal = 0, apres70 = 0, versAutres = 0, sansBeneficiaire = 0;
   av.forEach((a) => {
-    if (!avAvant70Effectif(a, personnes)) return; // seulement les primes avant 70 ans (990 I)
     const m = Number(a.montant) || 0;
-    const bens = (a.beneficiaires || []).filter(estEnfant);
-    if (!m || !bens.length) return;
+    totalAvGlobal += m;
+    if (!m) return;
+    if (!avAvant70Effectif(a, personnes)) { apres70 += m; return; } // après 70 ans (757 B) : autre régime
+    const bensAll = a.beneficiaires || [];
+    if (!bensAll.length) { sansBeneficiaire += m; return; }
     const rep = a.repartition || {};
-    const tot = bens.reduce((s, b) => s + (Number(rep[b]) || 0), 0);
+    const tot = bensAll.reduce((s, b) => s + (Number(rep[b]) || 0), 0);
     const assure = a.cosouscripteurId ? `${nom(a.souscripteurId)} + ${nom(a.cosouscripteurId)}` : nom(a.souscripteurId);
-    bens.forEach((b) => {
-      const share = tot > 0 ? (Number(rep[b]) || 0) / tot : 1 / bens.length;
-      legs[`${assure}|${b}`] = (legs[`${assure}|${b}`] || 0) + m * share;
+    // Répartition sur TOUS les bénéficiaires ; on ne retient que les jambes vers les enfants,
+    // le reste (conjoint/autres) est comptabilisé à part.
+    bensAll.forEach((b) => {
+      const share = tot > 0 ? (Number(rep[b]) || 0) / tot : 1 / bensAll.length;
+      if (estEnfant(b)) legs[`${assure}|${b}`] = (legs[`${assure}|${b}`] || 0) + m * share;
+      else versAutres += m * share;
     });
   });
+  const seuil3125 = PLAFOND_AV + AV_AVANT_70.seuilTranche1;
   const rows = Object.entries(legs).map(([k, capital]) => {
     const [assure, benId] = k.split("|");
-    const palier = capital <= PLAFOND_AV ? "franchise" : capital <= PLAFOND_AV + AV_AVANT_70.seuilTranche1 ? "20" : "31.25";
+    const palier = capital <= PLAFOND_AV ? "franchise" : capital <= seuil3125 ? "20" : "31.25";
     return {
       assure, enfant: nom(benId), capital, palier,
-      capaciteAvant3125: Math.max(0, PLAFOND_AV + AV_AVANT_70.seuilTranche1 - capital),
+      capaciteAvant3125: Math.max(0, seuil3125 - capital),
       droits: droits990(capital),
     };
   }).sort((a, b) => a.enfant.localeCompare(b.enfant) || b.capital - a.capital);
+  const totalCouvert = rows.reduce((s, r) => s + r.capital, 0);
   // Récap par enfant (somme des jambes, chacune avec ses propres plafonds)
   const parEnfant = {};
   rows.forEach((r) => { (parEnfant[r.enfant] ||= { capital: 0, droits: 0, nbAssures: 0 }); parEnfant[r.enfant].capital += r.capital; parEnfant[r.enfant].droits += r.droits; parEnfant[r.enfant].nbAssures += 1; });
-  const seuil3125 = PLAFOND_AV + AV_AVANT_70.seuilTranche1;
-  return { rows, parEnfant, seuil3125, plafond: PLAFOND_AV };
+  return { rows, parEnfant, seuil3125, plafond: PLAFOND_AV, totalAvGlobal, totalCouvert, apres70, versAutres, sansBeneficiaire };
 }
 
 // -------------------------------------------------------------

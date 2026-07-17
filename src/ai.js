@@ -3,7 +3,7 @@
 //  Le Worker garde la clé API en secret (ANTHROPIC_API_KEY) et
 //  répond sur la même URL que la sauvegarde, en POST.
 // =============================================================
-import { getPassword, getApiUrl } from "./sync.js?v=72";
+import { getPassword, getApiUrl } from "./sync.js?v=73";
 
 // Envoie une conversation à l'IA. `system` = consigne + contexte patrimonial,
 // `messages` = [{role:'user'|'assistant', content}]. Renvoie le texte de réponse.
