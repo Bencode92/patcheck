@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=78";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=78";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=78";
-import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant } from "./optim.js?v=78";
-import * as sync from "./sync.js?v=78";
-import { askAI } from "./ai.js?v=78";
+} from "./data.js?v=79";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=79";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=79";
+import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation } from "./optim.js?v=79";
+import * as sync from "./sync.js?v=79";
+import { askAI } from "./ai.js?v=79";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2107,7 +2107,67 @@ function renderOptimiseur() {
       <p class="muted small" style="margin-top:8px">Total transmissible en franchise dès maintenant : <b style="color:var(--accent-2)">${eur2(timing.capaciteExoneree)}</b>. Chaque fenêtre « disponible » gagne à être ouverte tôt (le compteur des 15 ans redémarre à la donation).</p>
     </div>` : "";
 
-  c.innerHTML = cockpit + avCard + dememCard + timingCard;
+  // --- Carte comparateur contrat de capitalisation (données réelles)
+  const capiBiens = biens.filter((b) => b.categorie === "capitalisation");
+  const capiCard = capiBiens.length ? `
+    <div class="card">
+      <h2>🏦 Contrat de capitalisation — quelle stratégie de transmission ?</h2>
+      <p class="muted small">Compare, sur TES contrats de capitalisation, le coût fiscal <b>total après impôt</b> (droits de mutation + IR + prélèvements sociaux au rachat) de 3 voies : <b>A</b> donner la nue-propriété (démembrement), <b>B</b> donner en pleine propriété, <b>C</b> ne rien faire (succession). Base IR : NP à la donation (A, purge partielle §225) · valeur pleine (B, purge totale) · valeur au décès (C, step-up). Indicatif — à valider fiscaliste.</p>
+      <div class="form-row">
+        <label>Contrat
+          <select id="k_bien">${capiBiens.map((b, i) => `<option value="${b.id}" ${i === 0 ? "selected" : ""}>${b.libelle} — ${eur2(b.valeurNette)}</option>`).join("")}</select>
+        </label>
+        <label>Âge du donateur<input type="number" id="k_age" value="${ageParentDefaut}" min="30" max="100"></label>
+        <label>Rendement (%/an)<input type="number" id="k_r" value="3" min="0" max="10" step="0.5"></label>
+      </div>
+      <div class="form-row">
+        <label>Donation → décès (ans)<input type="number" id="k_t1" value="20" min="0" max="50"></label>
+        <label>Décès → rachat (ans)<input type="number" id="k_t2" value="3" min="0" max="30"></label>
+        <label>Ancienneté actuelle du contrat (ans)<input type="number" id="k_age0" value="0" min="0" max="30"></label>
+        <label>TMI (%)<input type="number" id="k_tmi" value="30" min="0" max="45" step="1"></label>
+      </div>
+      <label class="benef-chk" style="margin:2px 0 8px"><input type="checkbox" id="k_couple" checked> Couple (abattement annuel 9 200 € au rachat)</label>
+      <button id="k_go" class="btn primary">Comparer les 3 voies</button>
+      <div id="k_result"></div>
+    </div>` : "";
+
+  c.innerHTML = cockpit + avCard + dememCard + capiCard + timingCard;
+
+  // --- Interaction comparateur capitalisation
+  if (capiBiens.length) {
+    const runK = () => {
+      const bien = capiBiens.find((b) => b.id === $("#k_bien").value) || capiBiens[0];
+      const r = comparerCapitalisation(bien, {
+        rendement: parseNum($("#k_r").value) / 100,
+        ageDonateur: parseNum($("#k_age").value),
+        anneesDonDeces: parseNum($("#k_t1").value),
+        anneesDecesRachat: parseNum($("#k_t2").value),
+        ageContratActuel: parseNum($("#k_age0").value),
+        tmi: parseNum($("#k_tmi").value) / 100,
+        couple: $("#k_couple").checked,
+        primes: bien.valeurNette,
+      });
+      const eco = (row) => row.nom === r.best ? '<span class="badge ok">le meilleur net</span>' : `<span class="muted small">−${eur2(r.rows.find((x) => x.nom === r.best).netEnfant - row.netEnfant)}</span>`;
+      $("#k_result").innerHTML = `
+        <p class="muted small" style="margin-top:10px">Valeurs projetées : donation <b>${eur2(r.vDon)}</b> · NP ${pct(r.npFrac)} = ${eur2(r.vDon * r.npFrac)} · décès <b>${eur2(r.vDeces)}</b> · rachat <b>${eur2(r.vRachat)}</b></p>
+        <div class="table-wrap"><table class="grid2">
+          <thead><tr><th>Voie</th><th>Droits mutation</th><th>IR rachat</th><th>PS rachat</th><th>Total prélèv.</th><th>NET enfant</th><th></th></tr></thead>
+          <tbody>${r.rows.map((row) => `<tr>
+            <td><b>${row.nom}</b><br><span class="muted small">${row.note}</span></td>
+            <td class="num">${eur2(row.droits)}</td><td class="num">${eur2(row.ir)}</td><td class="num">${eur2(row.ps)}</td>
+            <td class="num droits">${eur2(row.total)}</td><td class="num net"><b>${eur2(row.netEnfant)}</b></td><td>${eco(row)}</td>
+          </tr>`).join("")}</tbody>
+        </table></div>
+        <div class="optim-verdict" style="margin-top:10px"><b>Verdict :</b> la voie <b>« ${r.best} »</b> laisse le plus net à l'enfant. Le démembrement optimise les <b>droits de donation</b> mais gèle la base IR → sur horizon long, la <b>succession (step-up)</b> peut l'emporter ; sur gros capital / donateur jeune / horizon court, le démembrement domine.</div>
+        <div class="fiche" style="margin-top:10px">
+          <div class="row"><span class="k">⚠️ Incertitude §225 (voie A) — net enfant selon la base IR retenue</span><span class="v"></span></div>
+          ${r.incert.map((x) => `<div class="row sub"><span class="k">base = ${x.base}</span><span class="v num">${eur2(x.net)}</span></div>`).join("")}
+        </div>
+        <p class="muted small" style="margin-top:6px">Point non tranché (QE Sénat n°07190). Convention de démembrement écrite indispensable. À valider notaire/fiscaliste.</p>`;
+    };
+    $("#k_go").addEventListener("click", runK);
+    runK();
+  }
 
   // --- Interaction démembrement
   if (biens.length) {

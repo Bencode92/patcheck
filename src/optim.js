@@ -3,11 +3,11 @@
 //  Consomme debrief(state) + barèmes data.js. Zéro DOM.
 //  Tout est INDICATIF, à valider avec un notaire.
 // =============================================================
-import { debrief, avAvant70Effectif } from "./graph.js?v=78";
+import { debrief, avAvant70Effectif } from "./graph.js?v=79";
 import {
   ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70,
   BAREME_LIGNE_DIRECTE, calculDroits, tauxUsufruit,
-} from "./data.js?v=78";
+} from "./data.js?v=79";
 
 const PLAFOND_AV = AV_AVANT_70.abattement; // 152 500 € / bénéficiaire (990 I)
 
@@ -153,6 +153,57 @@ export function avParAssureEnfant(state) {
   });
   const parEnfant = Object.values(parEnfantMap).sort((a, b) => b.capital - a.capital);
   return { rows, parEnfant, seuil3125, plafond: PLAFOND_AV, totalAvGlobal, totalCouvert, apres70, versAutres, sansBeneficiaire };
+}
+
+// Comparateur fiscal d'un CONTRAT DE CAPITALISATION : donation NP démembrée (A)
+// vs donation pleine propriété (B) vs succession (C). Coût total = droits de
+// mutation + IR + PS au rachat de l'enfant → net final. Règles BOI-RPPM-RCM-
+// 20-10-20-50 §225 : base IR = NP à la donation (A, purge partielle), valeur pleine
+// à la donation (B, purge totale), valeur au décès (C, step-up succession).
+const PS_RATE = 0.172, SEUIL_PRIMES = 150000, TAUX_REDUIT = 0.075, TAUX_PFU = 0.128;
+function impotRachatCapi(gain, ageContrat, primes, primesAvant2017, useBareme, tmi, couple) {
+  if (gain <= 0) return { ir: 0, ps: 0 };
+  const ps = gain * PS_RATE;
+  const abatt = ageContrat >= 8 ? (couple ? 9200 : 4600) : 0;
+  const gainIr = Math.max(0, gain - abatt);
+  let ir;
+  if (useBareme) ir = gainIr * tmi;
+  else if (ageContrat >= 8) {
+    let taux;
+    if (primesAvant2017 || primes <= SEUIL_PRIMES) taux = TAUX_REDUIT;
+    else { const f = SEUIL_PRIMES / primes; taux = TAUX_REDUIT * f + TAUX_PFU * (1 - f); }
+    ir = gainIr * taux;
+  } else ir = gainIr * TAUX_PFU;
+  return { ir: Math.round(ir), ps: Math.round(ps) };
+}
+export function comparerCapitalisation(actif, p) {
+  const r = 1 + (Number(p.rendement) || 0);
+  const vDon = Number(actif.valeurNette) || 0;          // valeur aujourd'hui = référence donation
+  const primes = Number(p.primes) || vDon;              // proxy si primes inconnues
+  const vDeces = vDon * Math.pow(r, p.anneesDonDeces);
+  const vRachat = vDeces * Math.pow(r, p.anneesDecesRachat);
+  const ageContrat = (Number(p.ageContratActuel) || 0) + p.anneesDonDeces + p.anneesDecesRachat;
+  const npFrac = 1 - tauxUsufruit(p.ageDonateur);
+  const abattDon = p.abattementDonation != null ? p.abattementDonation : ABATTEMENTS.enfant;
+  const dmtg = (base) => calculDroits(Math.max(0, base - abattDon), BAREME_LIGNE_DIRECTE);
+  const tax = (gain) => impotRachatCapi(gain, ageContrat, primes, p.primesAvant2017, p.useBareme, p.tmi, p.couple);
+  const build = (nom, droits, baseIr, note) => {
+    const t = tax(Math.max(0, vRachat - baseIr));
+    return { nom, droits, ir: t.ir, ps: t.ps, total: droits + t.ir + t.ps, netEnfant: Math.round(vRachat - droits - t.ir - t.ps), baseIr, note };
+  };
+  const vNpDon = vDon * npFrac;
+  const A = build("A · Donation NP (démembrée)", dmtg(vNpDon), vNpDon, "base IR = NP à la donation (prudent §225)");
+  const B = build("B · Donation pleine propriété", dmtg(vDon), vDon, "purge totale à la valeur du jour");
+  const C = build("C · Succession (rien)", dmtg(vDeces), vDeces, "step-up : base IR = valeur au décès");
+  const rows = [A, B, C];
+  const best = rows.reduce((a, b) => (b.netEnfant > a.netEnfant ? b : a)).nom;
+  // Incertitude §225 sur la stratégie A : borne le net selon la base retenue
+  const incert = [
+    { base: "NP à la donation (prudent)", net: A.netEnfant },
+    { base: "PP à la donation", net: Math.round(vRachat - A.droits - tax(Math.max(0, vRachat - vDon)).ir - tax(Math.max(0, vRachat - vDon)).ps) },
+    { base: "valeur au décès (step-up)", net: Math.round(vRachat - A.droits - tax(Math.max(0, vRachat - vDeces)).ir - tax(Math.max(0, vRachat - vDeces)).ps) },
+  ];
+  return { rows, best, vDon, vDeces, vRachat, npFrac, incert };
 }
 
 // -------------------------------------------------------------
