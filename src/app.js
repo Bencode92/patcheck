@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=67";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=67";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=67";
-import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine } from "./optim.js?v=67";
-import * as sync from "./sync.js?v=67";
-import { askAI } from "./ai.js?v=67";
+} from "./data.js?v=68";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=68";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=68";
+import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine } from "./optim.js?v=68";
+import * as sync from "./sync.js?v=68";
+import { askAI } from "./ai.js?v=68";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -537,6 +537,10 @@ async function renderOrganigramme() {
   const patrimoineGlobal = d.patrimoineFoyer + avTotal;
   const tauxEffectif = patrimoineGlobal > 0 ? d.totalDroitsTous / patrimoineGlobal : 0;
   const AB_AV = 152500;
+  const SEUIL_AV_3125 = AB_AV + 700000; // 852 500 € : bascule 20 % → 31,25 % (990 I)
+  // Patrimoine brut (avant dettes) — pour afficher brut → dettes → net
+  const brutBiens = d.patrimoineFoyer + (d.totalDettes || 0);
+  const brutGlobal = brutBiens + avTotal;
 
   // ---- ① Cockpit ----
   const cockpit = `<div class="cockpit">
@@ -545,6 +549,18 @@ async function renderOrganigramme() {
     <div class="kpi2 alert"><div class="lbl">Total droits à payer</div><div class="val num">${eur(d.totalDroitsTous)}</div><div class="sub">Succession ${eur(d.droitsSuccessionGlobaux)} + AV ${eur(d.totalDroitsAV)}</div></div>
     <div class="kpi2"><div class="lbl">Taux effectif</div><div class="val num">${pct(tauxEffectif)}</div><div class="sub">Droits / patrimoine global transmis</div></div>
   </div>`;
+
+  // ---- ①bis Patrimoine brut → dettes → net ----
+  const brutNet = `<div class="card">
+    <h2>🧮 Patrimoine brut → net</h2>
+    <div class="small muted" style="margin-bottom:10px">Le <b>brut</b> = valeur de marché des biens (avant emprunts). Le <b>net</b> = ce qu'il reste une fois les dettes déduites.</div>
+    <div class="fiche">
+      <div class="row"><span class="k">Patrimoine BRUT (biens + assurance-vie, avant dettes)</span><span class="v num">${eur(brutGlobal)}</span></div>
+      <div class="row sub"><span class="k">dont biens (immobilier, SCI, entreprise, titres, liquidités) — valeur marchande</span><span class="v num">${eur(brutBiens)}</span></div>
+      ${avTotal > 0 ? `<div class="row sub"><span class="k">dont assurance-vie / PER</span><span class="v num">${eur(avTotal)}</span></div>` : ""}
+      <div class="row"><span class="k">− Dettes totales (capital restant dû)</span><span class="v num neg">−${eur(d.totalDettes || 0)}</span></div>
+      <div class="row grand"><span class="k">= Patrimoine NET du foyer</span><span class="v num">${eur(patrimoineGlobal)}</span></div>
+    </div></div>`;
 
   // ---- ② Répartition miroir (2 parents) ----
   const catKey = (cat) => (cat === "sci" ? "immobilier" : cat);
@@ -674,11 +690,16 @@ async function renderOrganigramme() {
         const over = x.capital > AB_AV;
         const pctUsed = Math.min(100, Math.round(x.capital / AB_AV * 100));
         const reste = Math.max(0, AB_AV - x.capital);
+        const palier = x.capital <= AB_AV ? "franchise" : x.capital <= SEUIL_AV_3125 ? "20" : "31.25";
+        const resteAvant31 = Math.max(0, SEUIL_AV_3125 - x.capital);
+        const palierTag = palier === "franchise" ? '<span class="badge ok">franchise 0 %</span>' : palier === "20" ? '<span class="badge" style="background:#fdf3e4;color:#96570a;border-color:#f3ddba">palier 20 %</span>' : '<span class="badge" style="background:#ffe0dd;color:#b42318;border-color:#f3b8b0">palier 31,25 %</span>';
         return `<div class="benef-card">
           <div class="nom">${x.nom}</div>
           <div class="cap-recu num">${eur(x.capital)}</div>
           <div class="gauge2"><div class="bar"><div class="fill ${over ? "over" : ""}" style="width:${pctUsed}%"></div></div>
             <div class="cap"><span>${over ? "Abattement 152 500 € dépassé" : "Abattement utilisé à " + pctUsed + " %"}</span><span class="num">${over ? pctUsed + " %" : eur(reste) + " restants"}</span></div></div>
+          <div class="kv"><span class="k">Palier marginal</span><span class="v">${palierTag}</span></div>
+          <div class="kv"><span class="k">Reste avant 31,25 %</span><span class="v num ${resteAvant31 > 0 ? "pos" : "neg"}">${resteAvant31 > 0 ? eur(resteAvant31) : "0 € ⚠️ stop"}</span></div>
           <div class="kv"><span class="k">Base taxable</span><span class="v num">${eur(x.base)}</span></div>
           <div class="kv"><span class="k">Droits</span><span class="v num ${x.droits > 0 ? "neg" : "pos"}">${eur(x.droits)}</span></div>
           <div class="kv total"><span class="k">Net perçu</span><span class="v num pos">${eur(x.net)}</span></div>
@@ -745,6 +766,7 @@ async function renderOrganigramme() {
   c.innerHTML = `
     ${!hasData ? `<div class="card"><p class="muted">Commence par saisir ta famille (onglet 👪 Famille) et ton patrimoine (onglet 🏦 Patrimoine). Le résumé se construit automatiquement ici.</p></div>` : ""}
     ${cockpit}
+    ${brutNet}
     ${mirror}
     ${diptyque}
     ${fiche}
