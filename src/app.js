@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=65";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=65";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=65";
-import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim } from "./optim.js?v=65";
-import * as sync from "./sync.js?v=65";
-import { askAI } from "./ai.js?v=65";
+} from "./data.js?v=66";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=66";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=66";
+import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine } from "./optim.js?v=66";
+import * as sync from "./sync.js?v=66";
+import { askAI } from "./ai.js?v=66";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1876,11 +1876,9 @@ function renderOptimiseur() {
   const ageParentDefaut = agesP.length ? Math.min(...agesP) : 62;
   const espDefaut = 90;
 
-  // Abattement moyen encore disponible par enfant (aujourd'hui)
-  const perEnf = {}; E.forEach((e) => (perEnf[e.nom] = 0));
-  (d.abatt || []).forEach((a) => { if (perEnf[a.enfant] != null) perEnf[a.enfant] += a.restant; });
-  const valsAb = Object.values(perEnf);
-  const abattParEnfantNow = valsAb.length ? valsAb.reduce((s, x) => s + x, 0) / valsAb.length : ABATTEMENTS.enfant * nbParents;
+  // Abattement moyen encore disponible par enfant AUJOURD'HUI (effet cumulé de toutes
+  // les donations passées, calculé automatiquement)
+  const abattParEnfantNow = abattementMoyenADate(state, 0);
 
   const avOpt = optimiserAV(state);
   const timing = timingDonations(state);
@@ -1937,25 +1935,24 @@ function renderOptimiseur() {
     <div class="card"><h2>🛡️ Assurance-vie — plafonds</h2><p class="muted">Aucun capital d'assurance-vie « avant 70 ans » (990 I) avec bénéficiaire renseigné. Renseigne tes contrats dans l'onglet Assurance-vie.</p></div>`;
 
   // --- Carte démembrement : maintenant vs attendre la recharge d'abattement vs succession
-  // Horizon d'attente = délai réel avant que l'abattement se recharge (dépend des
-  // donations déjà faites), PAS 15 ans en dur. 0 si l'abattement est déjà libre.
-  const anneeActuelle = new Date().getFullYear();
-  const rechargesAns = timing.rows.filter((r) => r.prochaineRecharge).map((r) => r.prochaineRecharge - anneeActuelle).filter((y) => y > 0);
-  const horizonDefaut = rechargesAns.length ? Math.min(...rechargesAns) : 0;
+  // Horizon d'attente = délai avant recharge COMPLÈTE de l'abattement (15 ans après la
+  // donation la plus récente), calculé AUTOMATIQUEMENT à partir de toutes les donations.
+  const horizonDefaut = horizonRechargePleine(state);
   const dememCard = biens.length ? `
     <div class="card">
       <h2>🏛️ Démembrement — donner la nue-propriété : maintenant vs attendre la recharge</h2>
-      <p class="muted small">Compare, pour un bien détenu en pleine propriété par les parents : donner la <b>nue-propriété</b> aujourd'hui (le parent garde l'usufruit et le contrôle), <b>attendre la recharge de l'abattement</b>, ou <b>ne rien faire</b> (succession en pleine propriété). ⏳ <b>Le « délai d'attente » n'est pas 15 ans en dur</b> : c'est le temps avant que ton abattement 100 000 € se recharge — il dépend de <b>quand et combien</b> tu as déjà donné à chaque enfant (${horizonDefaut > 0 ? `prochaine recharge dans <b>${horizonDefaut} an(s)</b>` : `abattement <b>déjà disponible</b> → attendre n'apporte rien de plus, ça ne fait qu'augmenter la nue-propriété taxable`}).</p>
+      <p class="muted small">Compare, pour un bien détenu en pleine propriété par les parents : donner la <b>nue-propriété</b> aujourd'hui (le parent garde l'usufruit et le contrôle), <b>attendre la recharge de l'abattement</b>, ou <b>ne rien faire</b> (succession en pleine propriété). ⏳ Le délai d'attente est <b>calculé automatiquement</b> à partir de tes donations passées (effet cumulé) : ${horizonDefaut > 0 ? `recharge complète de l'abattement dans <b>${horizonDefaut} an(s)</b>` : `abattement <b>déjà plein</b> → attendre n'apporte rien côté abattement, ça ne fait qu'augmenter la nue-propriété taxable`}. La <b>dette est amortie</b> sur l'horizon (moins d'emprunt = plus de valeur nette taxable).</p>
       <div class="form-row">
         <label>Bien
-          <select id="o_bien">${biens.map((b, i) => `<option value="${b.id}" ${i === 0 ? "selected" : ""}>${b.libelle} — net ${eur2(b.valeurNette)}${b.dutreil ? " · Dutreil" : ""}</option>`).join("")}</select>
+          <select id="o_bien">${biens.map((b, i) => `<option value="${b.id}" data-dette="${Math.round(b.dette)}" ${i === 0 ? "selected" : ""}>${b.libelle} — net ${eur2(b.valeurNette)}${b.dette > 0 ? ` (dette ${eur2(b.dette)})` : ""}${b.dutreil ? " · Dutreil" : ""}</option>`).join("")}</select>
         </label>
         <label>Fraction à donner (%)<input type="number" id="o_frac" value="10" min="1" max="100" step="5"></label>
-        <label>Délai avant recharge (années)<input type="number" id="o_horizon" value="${horizonDefaut}" min="0" max="30"></label>
+        <label>Délai recharge abatt. (auto, ans)<input type="number" id="o_horizon" value="${horizonDefaut}" min="0" max="30"></label>
       </div>
       <div class="form-row">
         <label>Âge de l'usufruitier<input type="number" id="o_age" value="${ageParentDefaut}" min="30" max="100"></label>
         <label>Revalorisation du bien (%/an)<input type="number" id="o_revalo" value="2" min="0" max="10" step="0.5"></label>
+        <label>Durée restante du prêt (ans)<input type="number" id="o_pret" value="15" min="0" max="30"></label>
         <label>Espérance de vie (âge)<input type="number" id="o_esp" value="${espDefaut}" min="70" max="105"></label>
       </div>
       <button id="o_go" class="btn primary">Comparer les 3 voies</button>
@@ -1988,13 +1985,13 @@ function renderOptimiseur() {
     const run = () => {
       const bien = biens.find((b) => b.id === $("#o_bien").value) || biens[0];
       const horizonAns = parseNum($("#o_horizon").value);
-      // Après recharge, l'abattement redevient plein (100 000 €/parent) ; s'il est déjà
-      // disponible (horizon 0), on garde l'abattement courant.
-      const abattParEnfantWait = horizonAns > 0 ? ABATTEMENTS.enfant * nbParents : abattParEnfantNow;
+      // Abattement disponible à l'horizon = calcul cumulé automatique (dons purgés à cette date future)
+      const abattParEnfantWait = abattementMoyenADate(state, horizonAns);
       const r = arbitrageDemembrement(bien, {
         revaloPct: parseNum($("#o_revalo").value),
         esperance: parseNum($("#o_esp").value),
         ageParent: parseNum($("#o_age").value),
+        dureePretAns: parseNum($("#o_pret").value),
         nbParents, nbEnfants, abattParEnfantNow, abattParEnfantWait, horizonAns,
         fractionAOffrir: parseNum($("#o_frac").value) / 100,
       });
@@ -2007,7 +2004,7 @@ function renderOptimiseur() {
           <thead><tr><th>Voie</th><th>Base taxable</th><th>Abatt./enfant</th><th>Droits estimés</th><th>Fraction NP</th><th></th></tr></thead>
           <tbody>
             <tr><td><b>${nomVoie.maintenant}</b><br><span class="muted small">Parent ${r.maintenant.age} ans · garde l'usufruit et le contrôle${bien.dutreil ? " · Dutreil −75 %" : ""}</span></td><td class="num">${eur2(r.maintenant.base)}</td><td class="num">${eur2(r.maintenant.abatt)}</td><td class="num droits">${eur2(r.maintenant.droits)}</td><td class="num">${pct(r.maintenant.npFrac)}</td><td>${eco("maintenant", r.maintenant.droits)}</td></tr>
-            <tr><td><b>${nomVoie.attendre}</b><br><span class="muted small">Parent ${r.attendre.age} ans · bien revalorisé · abattement rechargé${r.attendre.risqueDeces ? ' · <span style="color:var(--warn)">⚠️ au-delà de l\'espérance de vie</span>' : ""}</span></td><td class="num">${eur2(r.attendre.base)}</td><td class="num">${eur2(r.attendre.abatt)}</td><td class="num droits">${eur2(r.attendre.droits)}</td><td class="num">${pct(r.attendre.npFrac)}</td><td>${eco("attendre", r.attendre.droits)}</td></tr>
+            <tr><td><b>${nomVoie.attendre}</b><br><span class="muted small">Parent ${r.attendre.age} ans · net ${eur2(r.attendre.valeurNette)}${r.attendre.dette > 0 ? ` (dette résiduelle ${eur2(r.attendre.dette)})` : " (prêt soldé)"} · abattement rechargé${r.attendre.risqueDeces ? ' · <span style="color:var(--warn)">⚠️ au-delà de l\'espérance de vie</span>' : ""}</span></td><td class="num">${eur2(r.attendre.base)}</td><td class="num">${eur2(r.attendre.abatt)}</td><td class="num droits">${eur2(r.attendre.droits)}</td><td class="num">${pct(r.attendre.npFrac)}</td><td>${eco("attendre", r.attendre.droits)}</td></tr>
             <tr><td><b>${nomVoie.succession}</b><br><span class="muted small">Pleine propriété transmise au décès${bien.dutreil ? " · Dutreil −75 %" : ""}</span></td><td class="num">${eur2(r.succession.base)}</td><td class="num">${eur2(r.succession.abatt)}</td><td class="num droits">${eur2(r.succession.droits)}</td><td class="num">100 %</td><td>${eco("succession", r.succession.droits)}</td></tr>
           </tbody>
         </table></div>

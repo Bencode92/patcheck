@@ -1,7 +1,7 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=65";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=66";
 
 // Année de naissance : la DATE complète prime (plus précise), puis année seule, puis âge
 function birthYear(p) {
@@ -458,20 +458,25 @@ export function actifsTransmissiblesParents(state) {
   const detteParActif = {};
   dettes.forEach((x) => { if (isActif(x.cible)) detteParActif[x.cible] = (detteParActif[x.cible] || 0) + (Number(x.montant) || 0); });
 
-  // Valeur NETTE pleine (100 %) d'un actif : sa valeur propre si renseignée,
-  // SINON la somme nette des actifs qu'il détient. Cas courant : un immeuble logé
-  // dans une SCI, dont la valeur est portée sur l'IMMEUBLE (la SCI restant à 0) —
-  // on veut alors valoriser la SCI par ce qu'elle loge. Récursif, borné par `seen`.
-  const valeurNetteActif = (id, seen = new Set()) => {
-    if (seen.has(id)) return 0; seen.add(id);
-    const a = actifById(id); if (!a) return 0;
+  // Valeurs { brut, dette, net } pleines (100 %) d'un actif : sa valeur propre si
+  // renseignée, SINON la somme des biens qu'il détient. Cas courant : un immeuble logé
+  // dans une SCI, dont la valeur ET la dette sont portées sur l'IMMEUBLE (la SCI à 0) —
+  // on remonte alors brut ET dette au niveau SCI. Récursif, borné par `seen`.
+  const valeursActif = (id, seen = new Set()) => {
+    if (seen.has(id)) return { brut: 0, dette: 0, net: 0 };
+    seen.add(id);
+    const a = actifById(id); if (!a) return { brut: 0, dette: 0, net: 0 };
+    const detteA = detteParActif[id] || 0;
     const propre = Number(a.valeur) || 0;
-    if (propre > 0) return Math.max(0, propre - (detteParActif[id] || 0));
-    let sous = 0;
+    if (propre > 0) return { brut: propre, dette: detteA, net: Math.max(0, propre - detteA) };
+    let brut = 0, dette = detteA;
     detentions.forEach((d) => {
-      if (d.proprietaire === id && isActif(d.actifRef)) sous += valeurNetteActif(d.actifRef, seen) * partNum(d.part) / 100;
+      if (d.proprietaire === id && isActif(d.actifRef)) {
+        const c = valeursActif(d.actifRef, seen), q = partNum(d.part) / 100;
+        brut += c.brut * q; dette += c.dette * q;
+      }
     });
-    return Math.max(0, sous - (detteParActif[id] || 0));
+    return { brut, dette, net: Math.max(0, brut - dette) };
   };
 
   // Âge du plus jeune parent aujourd'hui (l'usufruit dure jusqu'au dernier décès)
@@ -487,14 +492,12 @@ export function actifsTransmissiblesParents(state) {
   });
   return Object.entries(parActif).map(([id, partPct]) => {
     const a = actifById(id);
-    const detteA = detteParActif[id] || 0;
-    const netFull = valeurNetteActif(id);   // nette pleine (valeur propre OU somme des biens logés)
-    const brutFull = netFull + detteA;       // brut = net + dette propre (cohérent dans les 2 cas)
+    const v = valeursActif(id); // { brut, dette, net } pleins (100 %), dette nichée remontée
     return {
       id, libelle: a.libelle || id, categorie: a.categorie,
-      valeurBrute: brutFull * partPct / 100,
-      dette: detteA * partPct / 100,
-      valeurNette: netFull * partPct / 100,
+      valeurBrute: v.brut * partPct / 100,
+      dette: v.dette * partPct / 100,
+      valeurNette: v.net * partPct / 100,
       partPct, dutreil: !!a.dutreil, ageUsufruitierAujourdhui,
     };
   }).filter((x) => x.valeurNette > 0);

@@ -3,11 +3,11 @@
 //  Consomme debrief(state) + barèmes data.js. Zéro DOM.
 //  Tout est INDICATIF, à valider avec un notaire.
 // =============================================================
-import { debrief } from "./graph.js?v=65";
+import { debrief } from "./graph.js?v=66";
 import {
   ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70,
   BAREME_LIGNE_DIRECTE, calculDroits, tauxUsufruit,
-} from "./data.js?v=65";
+} from "./data.js?v=66";
 
 const PLAFOND_AV = AV_AVANT_70.abattement; // 152 500 € / bénéficiaire (990 I)
 
@@ -100,26 +100,40 @@ export function arbitrageDemembrement(actif, p) {
   // a déjà été donné), PAS 15 ans en dur. 0 si l'abattement est déjà disponible.
   const horizon = p.horizonAns != null ? Math.max(0, Number(p.horizonAns)) : DELAI_RAPPEL_ANS;
 
+  // Valeur NETTE à un horizon h : le BRUT est revalorisé, mais la DETTE est AMORTIE
+  // (capital restant dû qui baisse) → la valeur nette taxable grimpe doublement.
+  const brut0 = Number(actif.valeurBrute) || Number(actif.valeurNette) || 0;
+  const dette0 = Number(actif.dette) || 0;
+  const dureePret = p.dureePretAns != null ? Math.max(0, Number(p.dureePretAns)) : 0;
+  const netA = (h) => {
+    const brut = brut0 * Math.pow(revalo, h);
+    const dette = dureePret > 0 ? dette0 * Math.max(0, 1 - h / dureePret) : dette0; // amortissement linéaire
+    return { net: Math.max(0, brut - dette), brut, dette };
+  };
+
   // MAINTENANT — donation de la nue-propriété (le parent garde l'usufruit/contrôle)
+  const n0 = netA(0);
   const npNow = 1 - tauxUsufruit(p.ageParent);
-  const offerteNow = actif.valeurNette * frac;
+  const offerteNow = n0.net * frac;
   const baseNow = offerteNow * npNow * dutreilFactor;
   const droitsNow = droitsLD(baseNow, abattNow, nEnf);
 
-  // ATTENDRE LA RECHARGE — bien revalorisé sur l'horizon, parent plus âgé (NP plus
-  // grosse), mais abattement rechargé (100 000 €/parent/enfant à nouveau libre).
+  // ATTENDRE LA RECHARGE — bien revalorisé + dette amortie sur l'horizon, parent plus
+  // âgé (NP plus grosse), mais abattement rechargé (100 000 €/parent/enfant à nouveau libre).
   const ageWait = p.ageParent + horizon;
-  const valeurW = actif.valeurNette * Math.pow(revalo, horizon);
+  const nW = netA(horizon);
   const npFut = 1 - tauxUsufruit(ageWait);
-  const offerteFut = valeurW * frac;
+  const offerteFut = nW.net * frac;
   const baseFut = offerteFut * npFut * dutreilFactor;
   const droitsWait = droitsLD(baseFut, abattWait, nEnf);
   const risqueDeces = p.esperance != null && ageWait > p.esperance;
 
-  // NE RIEN FAIRE — succession à l'espérance de vie : PLEINE valeur revalorisée taxée
+  // NE RIEN FAIRE — succession à l'espérance de vie : PLEINE valeur nette revalorisée
+  // (dette quasi soldée), taxée en pleine propriété.
   const anneesDeces = Math.max(0, (p.esperance || p.ageParent) - p.ageParent);
-  const valeurDeces = actif.valeurNette * Math.pow(revalo, anneesDeces) * frac;
-  const baseDeces = valeurDeces * dutreilFactor; // pleine propriété transmise
+  const nD = netA(anneesDeces);
+  const valeurDeces = nD.net * frac;
+  const baseDeces = valeurDeces * dutreilFactor;
   const droitsDeces = droitsLD(baseDeces, abattFrais, nEnf);
 
   const scores = { maintenant: droitsNow, attendre: droitsWait, succession: droitsDeces };
@@ -129,16 +143,51 @@ export function arbitrageDemembrement(actif, p) {
   const ops = frac > 0 ? Math.ceil(1 / frac) : 0;
 
   return {
-    actif: { libelle: actif.libelle, valeurNette: actif.valeurNette, dutreil: actif.dutreil },
+    actif: { libelle: actif.libelle, valeurNette: n0.net, dutreil: actif.dutreil },
     frac, horizon,
-    maintenant: { valeurOfferte: offerteNow, npFrac: npNow, base: baseNow, droits: droitsNow, net: offerteNow - droitsNow, abatt: abattNow, age: p.ageParent },
-    attendre: { valeurOfferte: offerteFut, npFrac: npFut, base: baseFut, droits: droitsWait, net: offerteFut - droitsWait, valeurFuture: valeurW, risqueDeces, abatt: abattWait, age: ageWait, horizon },
-    succession: { valeur: valeurDeces, base: baseDeces, droits: droitsDeces, net: valeurDeces - droitsDeces, abatt: abattFrais },
+    maintenant: { valeurOfferte: offerteNow, npFrac: npNow, base: baseNow, droits: droitsNow, net: offerteNow - droitsNow, abatt: abattNow, age: p.ageParent, valeurNette: n0.net, dette: n0.dette },
+    attendre: { valeurOfferte: offerteFut, npFrac: npFut, base: baseFut, droits: droitsWait, net: offerteFut - droitsWait, valeurNette: nW.net, valeurBrute: nW.brut, dette: nW.dette, risqueDeces, abatt: abattWait, age: ageWait, horizon },
+    succession: { valeur: valeurDeces, base: baseDeces, droits: droitsDeces, net: valeurDeces - droitsDeces, abatt: abattFrais, valeurNette: nD.net, dette: nD.dette },
     best,
     deltaAttendreVsMaintenant: droitsWait - droitsNow,
     deltaMaintenantVsSuccession: droitsDeces - droitsNow,
     tranches: { ops, fraction: frac },
   };
+}
+
+// Abattement MOYEN encore disponible par enfant à une date future (now + horizonAns),
+// en tenant compte de TOUTES les donations déjà faites (effet cumulé) : un don n'est
+// « purgé » à cette date future que s'il a alors plus de 15 ans.
+export function abattementMoyenADate(state, horizonAns = 0) {
+  const personnes = state.personnes || [];
+  const donations = state.donations || [];
+  const enfants = personnes.filter((p) => p.role === "enfant");
+  const nbParents = Math.max(1, personnes.filter((p) => p.role === "parent").length);
+  const plafond = ABATTEMENTS.enfant * nbParents;
+  if (!enfants.length) return plafond;
+  const anneeActuelle = new Date().getFullYear();
+  const cut = anneeActuelle + (Number(horizonAns) || 0) - DELAI_RAPPEL_ANS; // dons d'année ≤ cut = purgés à l'horizon
+  const dispo = enfants.map((e) => {
+    const consomme = donations
+      .filter((d) => d.beneficiaireId === e.id && new Date(d.date).getFullYear() > cut)
+      .reduce((s, d) => s + (Number(d.montant) || 0), 0);
+    return Math.max(0, plafond - consomme);
+  });
+  return dispo.reduce((s, x) => s + x, 0) / dispo.length;
+}
+
+// Délai (années) avant recharge COMPLÈTE de l'abattement = 15 ans après la donation
+// la plus RÉCENTE encore dans le rappel fiscal (0 si aucun don < 15 ans → déjà plein).
+export function horizonRechargePleine(state) {
+  const personnes = state.personnes || [];
+  const donations = state.donations || [];
+  const anneeActuelle = new Date().getFullYear();
+  let maxAnneePurge = 0;
+  donations.forEach((d) => {
+    const an = new Date(d.date).getFullYear();
+    if (anneeActuelle - an < DELAI_RAPPEL_ANS) maxAnneePurge = Math.max(maxAnneePurge, an + DELAI_RAPPEL_ANS);
+  });
+  return maxAnneePurge ? Math.max(0, maxAnneePurge - anneeActuelle) : 0;
 }
 
 // -------------------------------------------------------------
