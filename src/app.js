@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=64";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=64";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=64";
-import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim } from "./optim.js?v=64";
-import * as sync from "./sync.js?v=64";
-import { askAI } from "./ai.js?v=64";
+} from "./data.js?v=65";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=65";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=65";
+import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim } from "./optim.js?v=65";
+import * as sync from "./sync.js?v=65";
+import { askAI } from "./ai.js?v=65";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1936,16 +1936,22 @@ function renderOptimiseur() {
     </div>` : `
     <div class="card"><h2>🛡️ Assurance-vie — plafonds</h2><p class="muted">Aucun capital d'assurance-vie « avant 70 ans » (990 I) avec bénéficiaire renseigné. Renseigne tes contrats dans l'onglet Assurance-vie.</p></div>`;
 
-  // --- Carte démembrement : maintenant vs 15 ans vs succession
+  // --- Carte démembrement : maintenant vs attendre la recharge d'abattement vs succession
+  // Horizon d'attente = délai réel avant que l'abattement se recharge (dépend des
+  // donations déjà faites), PAS 15 ans en dur. 0 si l'abattement est déjà libre.
+  const anneeActuelle = new Date().getFullYear();
+  const rechargesAns = timing.rows.filter((r) => r.prochaineRecharge).map((r) => r.prochaineRecharge - anneeActuelle).filter((y) => y > 0);
+  const horizonDefaut = rechargesAns.length ? Math.min(...rechargesAns) : 0;
   const dememCard = biens.length ? `
     <div class="card">
-      <h2>🏛️ Démembrement — donner la nue-propriété : maintenant vs attendre 15 ans</h2>
-      <p class="muted small">Compare, pour un bien détenu en pleine propriété par les parents : donner la <b>nue-propriété</b> aujourd'hui (le parent garde l'usufruit et le contrôle), l'<b>attendre 15 ans</b> (abattement rechargé mais NP plus grosse + bien revalorisé), ou <b>ne rien faire</b> (succession en pleine propriété). Barème 669 selon l'âge.</p>
+      <h2>🏛️ Démembrement — donner la nue-propriété : maintenant vs attendre la recharge</h2>
+      <p class="muted small">Compare, pour un bien détenu en pleine propriété par les parents : donner la <b>nue-propriété</b> aujourd'hui (le parent garde l'usufruit et le contrôle), <b>attendre la recharge de l'abattement</b>, ou <b>ne rien faire</b> (succession en pleine propriété). ⏳ <b>Le « délai d'attente » n'est pas 15 ans en dur</b> : c'est le temps avant que ton abattement 100 000 € se recharge — il dépend de <b>quand et combien</b> tu as déjà donné à chaque enfant (${horizonDefaut > 0 ? `prochaine recharge dans <b>${horizonDefaut} an(s)</b>` : `abattement <b>déjà disponible</b> → attendre n'apporte rien de plus, ça ne fait qu'augmenter la nue-propriété taxable`}).</p>
       <div class="form-row">
         <label>Bien
           <select id="o_bien">${biens.map((b, i) => `<option value="${b.id}" ${i === 0 ? "selected" : ""}>${b.libelle} — net ${eur2(b.valeurNette)}${b.dutreil ? " · Dutreil" : ""}</option>`).join("")}</select>
         </label>
         <label>Fraction à donner (%)<input type="number" id="o_frac" value="10" min="1" max="100" step="5"></label>
+        <label>Délai avant recharge (années)<input type="number" id="o_horizon" value="${horizonDefaut}" min="0" max="30"></label>
       </div>
       <div class="form-row">
         <label>Âge de l'usufruitier<input type="number" id="o_age" value="${ageParentDefaut}" min="30" max="100"></label>
@@ -1981,27 +1987,34 @@ function renderOptimiseur() {
   if (biens.length) {
     const run = () => {
       const bien = biens.find((b) => b.id === $("#o_bien").value) || biens[0];
+      const horizonAns = parseNum($("#o_horizon").value);
+      // Après recharge, l'abattement redevient plein (100 000 €/parent) ; s'il est déjà
+      // disponible (horizon 0), on garde l'abattement courant.
+      const abattParEnfantWait = horizonAns > 0 ? ABATTEMENTS.enfant * nbParents : abattParEnfantNow;
       const r = arbitrageDemembrement(bien, {
         revaloPct: parseNum($("#o_revalo").value),
         esperance: parseNum($("#o_esp").value),
         ageParent: parseNum($("#o_age").value),
-        nbParents, nbEnfants, abattParEnfantNow,
+        nbParents, nbEnfants, abattParEnfantNow, abattParEnfantWait, horizonAns,
         fractionAOffrir: parseNum($("#o_frac").value) / 100,
       });
-      const nomVoie = { maintenant: "Donner la NP maintenant", attendre: "Attendre 15 ans", succession: "Ne rien faire (succession)" };
-      const eco = (voie, x) => r.best === voie ? '<span class="badge ok">le moins coûteux</span>' : `<span class="muted small">+${eur2(x - (r.best === "maintenant" ? r.maintenant.droits : r.best === "attendre" ? r.attendre.droits : r.succession.droits))}</span>`;
+      const labelAttendre = horizonAns > 0 ? `Attendre la recharge (${horizonAns} an${horizonAns > 1 ? "s" : ""})` : "Attendre (abattement déjà libre)";
+      const nomVoie = { maintenant: "Donner la NP maintenant", attendre: labelAttendre, succession: "Ne rien faire (succession)" };
+      const bestDroits = r.best === "maintenant" ? r.maintenant.droits : r.best === "attendre" ? r.attendre.droits : r.succession.droits;
+      const eco = (voie, x) => r.best === voie ? '<span class="badge ok">le moins coûteux</span>' : `<span class="muted small">+${eur2(x - bestDroits)}</span>`;
       $("#o_result").innerHTML = `
         <div class="table-wrap" style="margin-top:12px"><table class="grid2">
-          <thead><tr><th>Voie</th><th>Base taxable</th><th>Droits estimés</th><th>Fraction NP</th><th></th></tr></thead>
+          <thead><tr><th>Voie</th><th>Base taxable</th><th>Abatt./enfant</th><th>Droits estimés</th><th>Fraction NP</th><th></th></tr></thead>
           <tbody>
-            <tr><td><b>${nomVoie.maintenant}</b><br><span class="muted small">Parent ${parseNum($("#o_age").value)} ans · garde l'usufruit et le contrôle${bien.dutreil ? " · Dutreil −75 %" : ""}</span></td><td class="num">${eur2(r.maintenant.base)}</td><td class="num droits">${eur2(r.maintenant.droits)}</td><td class="num">${pct(r.maintenant.npFrac)}</td><td>${eco("maintenant", r.maintenant.droits)}</td></tr>
-            <tr><td><b>${nomVoie.attendre}</b><br><span class="muted small">Parent ${parseNum($("#o_age").value) + 15} ans · bien revalorisé · abattement rechargé${r.attendre.risqueDeces ? ' · <span style="color:var(--warn)">⚠️ au-delà de l\'espérance de vie</span>' : ""}</span></td><td class="num">${eur2(r.attendre.base)}</td><td class="num droits">${eur2(r.attendre.droits)}</td><td class="num">${pct(r.attendre.npFrac)}</td><td>${eco("attendre", r.attendre.droits)}</td></tr>
-            <tr><td><b>${nomVoie.succession}</b><br><span class="muted small">Pleine propriété transmise au décès${bien.dutreil ? " · Dutreil −75 %" : ""}</span></td><td class="num">${eur2(r.succession.base)}</td><td class="num droits">${eur2(r.succession.droits)}</td><td class="num">100 %</td><td>${eco("succession", r.succession.droits)}</td></tr>
+            <tr><td><b>${nomVoie.maintenant}</b><br><span class="muted small">Parent ${r.maintenant.age} ans · garde l'usufruit et le contrôle${bien.dutreil ? " · Dutreil −75 %" : ""}</span></td><td class="num">${eur2(r.maintenant.base)}</td><td class="num">${eur2(r.maintenant.abatt)}</td><td class="num droits">${eur2(r.maintenant.droits)}</td><td class="num">${pct(r.maintenant.npFrac)}</td><td>${eco("maintenant", r.maintenant.droits)}</td></tr>
+            <tr><td><b>${nomVoie.attendre}</b><br><span class="muted small">Parent ${r.attendre.age} ans · bien revalorisé · abattement rechargé${r.attendre.risqueDeces ? ' · <span style="color:var(--warn)">⚠️ au-delà de l\'espérance de vie</span>' : ""}</span></td><td class="num">${eur2(r.attendre.base)}</td><td class="num">${eur2(r.attendre.abatt)}</td><td class="num droits">${eur2(r.attendre.droits)}</td><td class="num">${pct(r.attendre.npFrac)}</td><td>${eco("attendre", r.attendre.droits)}</td></tr>
+            <tr><td><b>${nomVoie.succession}</b><br><span class="muted small">Pleine propriété transmise au décès${bien.dutreil ? " · Dutreil −75 %" : ""}</span></td><td class="num">${eur2(r.succession.base)}</td><td class="num">${eur2(r.succession.abatt)}</td><td class="num droits">${eur2(r.succession.droits)}</td><td class="num">100 %</td><td>${eco("succession", r.succession.droits)}</td></tr>
           </tbody>
         </table></div>
         <div class="optim-verdict" style="margin-top:10px">
           <b>Verdict :</b> la voie <b>« ${nomVoie[r.best]} »</b> minimise les droits.
           ${r.deltaMaintenantVsSuccession > 0 ? `Donner la NP maintenant économise <b style="color:var(--accent-2)">${eur2(r.deltaMaintenantVsSuccession)}</b> vs ne rien faire.` : ""}
+          ${horizonAns > 0 ? ` Attendre ${horizonAns} an(s) recharge l'abattement mais fait grossir la nue-propriété taxable (parent plus âgé) et la valeur du bien — le tableau tranche selon TES chiffres.` : " Ton abattement est déjà disponible : rien à gagner à attendre côté abattement."}
           ${r.frac < 1 ? ` Avec une fraction de ${pct(r.frac)}, il faudrait ~<b>${r.tranches.ops}</b> opération(s) espacées de 15 ans pour transmettre tout le bien en purgeant les abattements.` : ""}
         </div>
         <p class="muted small" style="margin-top:6px">💡 Le démembrement ne taxe que la nue-propriété (fraction 669) et gèle la valeur transmise : la revalorisation future échappe aux droits. Le parent conserve les revenus et le contrôle via l'usufruit. À valider avec un notaire.</p>`;

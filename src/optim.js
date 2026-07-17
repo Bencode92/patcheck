@@ -3,11 +3,11 @@
 //  Consomme debrief(state) + barèmes data.js. Zéro DOM.
 //  Tout est INDICATIF, à valider avec un notaire.
 // =============================================================
-import { debrief } from "./graph.js?v=64";
+import { debrief } from "./graph.js?v=65";
 import {
   ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70,
   BAREME_LIGNE_DIRECTE, calculDroits, tauxUsufruit,
-} from "./data.js?v=64";
+} from "./data.js?v=65";
 
 const PLAFOND_AV = AV_AVANT_70.abattement; // 152 500 € / bénéficiaire (990 I)
 
@@ -95,6 +95,10 @@ export function arbitrageDemembrement(actif, p) {
   const nEnf = Math.max(1, p.nbEnfants || 1);
   const abattFrais = ABATTEMENTS.enfant * Math.max(1, p.nbParents || 1); // rechargé /enfant
   const abattNow = p.abattParEnfantNow != null ? p.abattParEnfantNow : abattFrais;
+  const abattWait = p.abattParEnfantWait != null ? p.abattParEnfantWait : abattFrais;
+  // Horizon d'attente = délai avant que l'abattement se RECHARGE (dépend de quand/quoi
+  // a déjà été donné), PAS 15 ans en dur. 0 si l'abattement est déjà disponible.
+  const horizon = p.horizonAns != null ? Math.max(0, Number(p.horizonAns)) : DELAI_RAPPEL_ANS;
 
   // MAINTENANT — donation de la nue-propriété (le parent garde l'usufruit/contrôle)
   const npNow = 1 - tauxUsufruit(p.ageParent);
@@ -102,13 +106,15 @@ export function arbitrageDemembrement(actif, p) {
   const baseNow = offerteNow * npNow * dutreilFactor;
   const droitsNow = droitsLD(baseNow, abattNow, nEnf);
 
-  // ATTENDRE 15 ANS — bien revalorisé, parent plus âgé (NP plus grosse), abattement rechargé
-  const valeur15 = actif.valeurNette * Math.pow(revalo, DELAI_RAPPEL_ANS);
-  const npFut = 1 - tauxUsufruit(p.ageParent + DELAI_RAPPEL_ANS);
-  const offerteFut = valeur15 * frac;
+  // ATTENDRE LA RECHARGE — bien revalorisé sur l'horizon, parent plus âgé (NP plus
+  // grosse), mais abattement rechargé (100 000 €/parent/enfant à nouveau libre).
+  const ageWait = p.ageParent + horizon;
+  const valeurW = actif.valeurNette * Math.pow(revalo, horizon);
+  const npFut = 1 - tauxUsufruit(ageWait);
+  const offerteFut = valeurW * frac;
   const baseFut = offerteFut * npFut * dutreilFactor;
-  const droitsWait = droitsLD(baseFut, abattFrais, nEnf);
-  const risqueDeces = p.esperance != null && p.ageParent + DELAI_RAPPEL_ANS > p.esperance;
+  const droitsWait = droitsLD(baseFut, abattWait, nEnf);
+  const risqueDeces = p.esperance != null && ageWait > p.esperance;
 
   // NE RIEN FAIRE — succession à l'espérance de vie : PLEINE valeur revalorisée taxée
   const anneesDeces = Math.max(0, (p.esperance || p.ageParent) - p.ageParent);
@@ -124,10 +130,10 @@ export function arbitrageDemembrement(actif, p) {
 
   return {
     actif: { libelle: actif.libelle, valeurNette: actif.valeurNette, dutreil: actif.dutreil },
-    frac,
-    maintenant: { valeurOfferte: offerteNow, npFrac: npNow, base: baseNow, droits: droitsNow, net: offerteNow - droitsNow },
-    attendre: { valeurOfferte: offerteFut, npFrac: npFut, base: baseFut, droits: droitsWait, net: offerteFut - droitsWait, valeurFuture: valeur15, risqueDeces },
-    succession: { valeur: valeurDeces, base: baseDeces, droits: droitsDeces, net: valeurDeces - droitsDeces },
+    frac, horizon,
+    maintenant: { valeurOfferte: offerteNow, npFrac: npNow, base: baseNow, droits: droitsNow, net: offerteNow - droitsNow, abatt: abattNow, age: p.ageParent },
+    attendre: { valeurOfferte: offerteFut, npFrac: npFut, base: baseFut, droits: droitsWait, net: offerteFut - droitsWait, valeurFuture: valeurW, risqueDeces, abatt: abattWait, age: ageWait, horizon },
+    succession: { valeur: valeurDeces, base: baseDeces, droits: droitsDeces, net: valeurDeces - droitsDeces, abatt: abattFrais },
     best,
     deltaAttendreVsMaintenant: droitsWait - droitsNow,
     deltaMaintenantVsSuccession: droitsDeces - droitsNow,

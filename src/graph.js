@@ -1,7 +1,7 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=64";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=65";
 
 // Année de naissance : la DATE complète prime (plus précise), puis année seule, puis âge
 function birthYear(p) {
@@ -452,9 +452,28 @@ export function actifsTransmissiblesParents(state) {
     if (typeof v === "string" && v.includes("/")) { const [x, y] = v.split("/").map(Number); return y ? (x / y) * 100 : 0; }
     return Number(v) || 0;
   };
+  const actifById = (id) => actifs.find((a) => a.id === id);
+  const isActif = (id) => actifs.some((a) => a.id === id);
   // Dette adossée par actif
   const detteParActif = {};
-  dettes.forEach((x) => { if (actifs.some((a) => a.id === x.cible)) detteParActif[x.cible] = (detteParActif[x.cible] || 0) + (Number(x.montant) || 0); });
+  dettes.forEach((x) => { if (isActif(x.cible)) detteParActif[x.cible] = (detteParActif[x.cible] || 0) + (Number(x.montant) || 0); });
+
+  // Valeur NETTE pleine (100 %) d'un actif : sa valeur propre si renseignée,
+  // SINON la somme nette des actifs qu'il détient. Cas courant : un immeuble logé
+  // dans une SCI, dont la valeur est portée sur l'IMMEUBLE (la SCI restant à 0) —
+  // on veut alors valoriser la SCI par ce qu'elle loge. Récursif, borné par `seen`.
+  const valeurNetteActif = (id, seen = new Set()) => {
+    if (seen.has(id)) return 0; seen.add(id);
+    const a = actifById(id); if (!a) return 0;
+    const propre = Number(a.valeur) || 0;
+    if (propre > 0) return Math.max(0, propre - (detteParActif[id] || 0));
+    let sous = 0;
+    detentions.forEach((d) => {
+      if (d.proprietaire === id && isActif(d.actifRef)) sous += valeurNetteActif(d.actifRef, seen) * partNum(d.part) / 100;
+    });
+    return Math.max(0, sous - (detteParActif[id] || 0));
+  };
+
   // Âge du plus jeune parent aujourd'hui (l'usufruit dure jusqu'au dernier décès)
   const agesParents = parents.map((p) => ageDePers(p)).filter((x) => x != null);
   const ageUsufruitierAujourdhui = agesParents.length ? Math.min(...agesParents) : 65;
@@ -462,18 +481,20 @@ export function actifsTransmissiblesParents(state) {
   const parActif = {};
   detentions.forEach((d) => {
     if (d.droit !== "PP" || !parentIds.has(d.proprietaire)) return;
-    const a = actifs.find((z) => z.id === d.actifRef);
+    const a = actifById(d.actifRef);
     if (!a || !CATS.has(a.categorie)) return;
     parActif[a.id] = (parActif[a.id] || 0) + partNum(d.part);
   });
   return Object.entries(parActif).map(([id, partPct]) => {
-    const a = actifs.find((z) => z.id === id);
-    const valeurPleine = Math.max(0, (Number(a.valeur) || 0) - (detteParActif[id] || 0));
+    const a = actifById(id);
+    const detteA = detteParActif[id] || 0;
+    const netFull = valeurNetteActif(id);   // nette pleine (valeur propre OU somme des biens logés)
+    const brutFull = netFull + detteA;       // brut = net + dette propre (cohérent dans les 2 cas)
     return {
       id, libelle: a.libelle || id, categorie: a.categorie,
-      valeurBrute: (Number(a.valeur) || 0) * partPct / 100,
-      dette: (detteParActif[id] || 0) * partPct / 100,
-      valeurNette: valeurPleine * partPct / 100,
+      valeurBrute: brutFull * partPct / 100,
+      dette: detteA * partPct / 100,
+      valeurNette: netFull * partPct / 100,
       partPct, dutreil: !!a.dutreil, ageUsufruitierAujourdhui,
     };
   }).filter((x) => x.valeurNette > 0);
