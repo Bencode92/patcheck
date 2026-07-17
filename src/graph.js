@@ -1,7 +1,7 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=75";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=76";
 
 // Année de naissance : la DATE complète prime (plus précise), puis année seule, puis âge
 function birthYear(p) {
@@ -66,6 +66,7 @@ export function buildMermaid(state) {
     else if (a.categorie === "entreprise") L.push(`  ${a.id}[["🏭 ${lbl}${a.dutreil ? "<br/><small>Dutreil −75%</small>" : ""}"]]:::entreprise`);
     else if (a.categorie === "liquidites") L.push(`  ${a.id}[("💶 ${lbl}")]:::cash`);
     else if (a.categorie === "titres") L.push(`  ${a.id}["📈 ${lbl}"]:::titres`);
+    else if (a.categorie === "capitalisation") L.push(`  ${a.id}[("🏦 ${lbl}")]:::capi`);
     else L.push(`  ${a.id}["${lbl}"]:::autre`);
   });
 
@@ -105,6 +106,7 @@ export function buildMermaid(state) {
   L.push("  classDef entreprise fill:#fde4f4,stroke:#c026a3,color:#0f2747;");
   L.push("  classDef cash fill:#d6f5ef,stroke:#0a9d6e,color:#0f2747;");
   L.push("  classDef titres fill:#dce7ff,stroke:#3b6fe0,color:#0f2747;");
+  L.push("  classDef capi fill:#e2f0e9,stroke:#0a9d6e,color:#0f2747;");
   L.push("  classDef av fill:#ffe0ee,stroke:#e0489a,color:#0f2747;");
   L.push("  classDef dette fill:#ffe0dd,stroke:#d92d20,color:#0f2747;");
   L.push("  classDef autre fill:#eef3fa,stroke:#5c7691,color:#0f2747;");
@@ -446,7 +448,7 @@ export function actifsTransmissiblesParents(state) {
   const dettes = state.dettes || [];
   const parents = personnes.filter((p) => p.role === "parent");
   const parentIds = new Set(parents.map((p) => p.id));
-  const CATS = new Set(["sci", "immobilier", "entreprise", "titres"]);
+  const CATS = new Set(["sci", "immobilier", "entreprise", "titres", "capitalisation"]);
   // Parts en % (gère les fractions saisies « 81/500 »)
   const partNum = (v) => {
     if (typeof v === "string" && v.includes("/")) { const [x, y] = v.split("/").map(Number); return y ? (x / y) * 100 : 0; }

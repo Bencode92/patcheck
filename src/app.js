@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=75";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=75";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=75";
-import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant } from "./optim.js?v=75";
-import * as sync from "./sync.js?v=75";
-import { askAI } from "./ai.js?v=75";
+} from "./data.js?v=76";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=76";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=76";
+import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant } from "./optim.js?v=76";
+import * as sync from "./sync.js?v=76";
+import { askAI } from "./ai.js?v=76";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -564,8 +564,8 @@ async function renderOrganigramme() {
 
   // ---- ② Répartition miroir (2 parents) ----
   const catKey = (cat) => (cat === "sci" ? "immobilier" : cat);
-  const MIRLBL = { immobilier: "🏠 Immobilier (dont SCI)", entreprise: "🏭 Entreprise", titres: "📈 Titres", liquidites: "💰 Liquidités", av: "🛡️ Assurance-vie" };
-  const MIRORDER = ["immobilier", "entreprise", "titres", "liquidites", "av"];
+  const MIRLBL = { immobilier: "🏠 Immobilier (dont SCI)", entreprise: "🏭 Entreprise", titres: "📈 Titres", liquidites: "💰 Liquidités", capitalisation: "🏦 Contrat de capitalisation", av: "🛡️ Assurance-vie" };
+  const MIRORDER = ["immobilier", "entreprise", "titres", "liquidites", "capitalisation", "av"];
   const parentCat = (p) => {
     const m = {};
     (d.parPersonneDetail[p.id] || []).forEach((it) => { const k = catKey(it.categorie); m[k] = (m[k] || 0) + it.valeur; });
@@ -711,7 +711,7 @@ async function renderOrganigramme() {
       ${d.apres70Reintegre > 0 ? `<div class="row sub"><span class="k">AV après 70 ans réintégrée (au-delà de 30 500 €)</span><span class="v num amb">+${eur(d.apres70Reintegre)}</span></div>` : ""}
       <div class="row"><span class="k">Base successorale globale</span><span class="v num">${eur(d.baseSuccessoraleGlobale)}</span></div>
       ${(() => {
-        const LBL = { immobilier: "🏠 Immobilier", sci: "🏢 SCI", entreprise: `🏭 Entreprise détenue${d.exonerationDutreil > 0 ? " (après Dutreil −75 %)" : ""}`, liquidites: "💰 Liquidités", titres: "📈 Titres", autre: "Autre", av_apres70: "🛡️ AV après 70 ans réintégrée" };
+        const LBL = { immobilier: "🏠 Immobilier", sci: "🏢 SCI", entreprise: `🏭 Entreprise détenue${d.exonerationDutreil > 0 ? " (après Dutreil −75 %)" : ""}`, liquidites: "💰 Liquidités", titres: "📈 Titres", capitalisation: "🏦 Contrat de capitalisation", autre: "Autre", av_apres70: "🛡️ AV après 70 ans réintégrée" };
         return Object.entries(d.taxableParCategorie || {}).filter(([, v]) => v > 0.5).sort((a, b) => b[1] - a[1])
           .map(([k, v]) => `<div class="row sub"><span class="k">dont ${LBL[k] || k}</span><span class="v num">${eur(v)}</span></div>`).join("");
       })()}
@@ -985,6 +985,7 @@ const CATEGORIES = [
   ["entreprise", "🏭 Capital entreprise"],
   ["liquidites", "💶 Liquidités / comptes"],
   ["titres", "📈 Titres / placements"],
+  ["capitalisation", "🏦 Contrat de capitalisation"],
   ["autre", "Autre"],
 ];
 const opt = (list, sel) =>
@@ -1000,7 +1001,7 @@ const mirrorHidden = new Set(); // catégories exclues du miroir par parent (tes
 
 const ETABLISSEMENTS = ["Generali", "Société Générale", "BNP Paribas", "Aviva", "Trading 212", "AXA", "Natixis", "Coinbase", "Allianz"];
 const datalistEtabs = () => `<datalist id="etabs">${ETABLISSEMENTS.map((e) => `<option value="${e}">`).join("")}</datalist>`;
-const CAT_A_BANQUE = new Set(["titres", "liquidites"]); // catégories où une banque/courtier a du sens
+const CAT_A_BANQUE = new Set(["titres", "liquidites", "capitalisation"]); // catégories où une banque/assureur a du sens
 
 const REGIMES = [
   ["", "— non précisé —"],
@@ -1039,6 +1040,7 @@ function renderPatrimoine() {
     const bits = [];
     if (a.categorie === "immobilier" && a.prixAcq && a.valeur) bits.push(`Plus-value latente : <b>${eur(a.valeur - a.prixAcq)}</b> (achat ${eur(a.prixAcq)} → marché ${eur(a.valeur)})`);
     if ((a.categorie === "immobilier" || a.categorie === "sci") && a.surface && a.valeur) bits.push(`<b>${eur(Math.round(a.valeur / a.surface))}/m²</b> (${a.surface} m²)`);
+    if (a.categorie === "capitalisation") bits.push(`🏦 <b>Contrat de capitalisation</b> : contrairement à l'assurance-vie, il <b>ne se dénoue PAS</b> au décès — il <b>entre dans la succession</b> (taxé au barème ligne directe, abattement 100 000 €/parent/enfant, PAS d'abattement 152 500 €). L'héritier le <b>conserve avec son antériorité fiscale</b>. Démembrable comme un autre bien.`);
     return bits.join(" · ");
   };
 
