@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=70";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=70";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=70";
-import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine } from "./optim.js?v=70";
-import * as sync from "./sync.js?v=70";
-import { askAI } from "./ai.js?v=70";
+} from "./data.js?v=71";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=71";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=71";
+import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine } from "./optim.js?v=71";
+import * as sync from "./sync.js?v=71";
+import { askAI } from "./ai.js?v=71";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1489,7 +1489,7 @@ function renderAv() {
         const checked = (contrat.beneficiaires || []).includes(p.id);
         const pctv = contrat.repartition?.[p.id] ?? "";
         return `<label class="benef-chk"><input type="checkbox" class="av_ben" data-i="${i}" data-p="${p.id}" ${checked ? "checked" : ""}> ${p.nom}${
-          checked ? `<input class="av_pct" data-i="${i}" data-p="${p.id}" inputmode="numeric" value="${pctv}" placeholder="%" style="max-width:46px;margin-left:6px"><span class="muted">%</span>` : ""
+          checked ? `<input class="av_pct" data-i="${i}" data-p="${p.id}" inputmode="decimal" value="${pctv}" placeholder="%" style="width:64px;max-width:64px;text-align:right;margin-left:6px"><span class="muted">%</span>` : ""
         }</label>`;
       })
       .join("");
