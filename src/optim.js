@@ -3,11 +3,11 @@
 //  Consomme debrief(state) + barèmes data.js. Zéro DOM.
 //  Tout est INDICATIF, à valider avec un notaire.
 // =============================================================
-import { debrief } from "./graph.js?v=71";
+import { debrief, avAvant70Effectif } from "./graph.js?v=72";
 import {
   ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70,
   BAREME_LIGNE_DIRECTE, calculDroits, tauxUsufruit,
-} from "./data.js?v=71";
+} from "./data.js?v=72";
 
 const PLAFOND_AV = AV_AVANT_70.abattement; // 152 500 € / bénéficiaire (990 I)
 
@@ -89,6 +89,45 @@ export function optimiserAV(state) {
     });
   }
   return { lignes, droitsActuels, droitsCible, economie, perHead, suggestions, capitalTotal, nHeirs: heirs.length, plafond: PLAFOND_AV, seuil3125: SEUIL_3125 };
+}
+
+// Vue « après décès » : capital 990 I reçu par chaque enfant, VENTILÉ PAR ASSURÉ.
+// Le plafond 152 500 € (abattement) PUIS 700 000 € à 20 % (bascule 31,25 % à 852 500 €)
+// s'apprécie par COUPLE assuré → bénéficiaire : chaque parent ouvre un plafond distinct.
+export function avParAssureEnfant(state) {
+  const personnes = state.personnes || [];
+  const av = state.av || [];
+  const enfants = personnes.filter((p) => p.role === "enfant");
+  const estEnfant = (id) => enfants.some((e) => e.id === id);
+  const nom = (id) => personnes.find((p) => p.id === id)?.nom || id;
+  const legs = {}; // "assuré|enfantId" -> capital 990 I
+  av.forEach((a) => {
+    if (!avAvant70Effectif(a, personnes)) return; // seulement les primes avant 70 ans (990 I)
+    const m = Number(a.montant) || 0;
+    const bens = (a.beneficiaires || []).filter(estEnfant);
+    if (!m || !bens.length) return;
+    const rep = a.repartition || {};
+    const tot = bens.reduce((s, b) => s + (Number(rep[b]) || 0), 0);
+    const assure = a.cosouscripteurId ? `${nom(a.souscripteurId)} + ${nom(a.cosouscripteurId)}` : nom(a.souscripteurId);
+    bens.forEach((b) => {
+      const share = tot > 0 ? (Number(rep[b]) || 0) / tot : 1 / bens.length;
+      legs[`${assure}|${b}`] = (legs[`${assure}|${b}`] || 0) + m * share;
+    });
+  });
+  const rows = Object.entries(legs).map(([k, capital]) => {
+    const [assure, benId] = k.split("|");
+    const palier = capital <= PLAFOND_AV ? "franchise" : capital <= PLAFOND_AV + AV_AVANT_70.seuilTranche1 ? "20" : "31.25";
+    return {
+      assure, enfant: nom(benId), capital, palier,
+      capaciteAvant3125: Math.max(0, PLAFOND_AV + AV_AVANT_70.seuilTranche1 - capital),
+      droits: droits990(capital),
+    };
+  }).sort((a, b) => a.enfant.localeCompare(b.enfant) || b.capital - a.capital);
+  // Récap par enfant (somme des jambes, chacune avec ses propres plafonds)
+  const parEnfant = {};
+  rows.forEach((r) => { (parEnfant[r.enfant] ||= { capital: 0, droits: 0, nbAssures: 0 }); parEnfant[r.enfant].capital += r.capital; parEnfant[r.enfant].droits += r.droits; parEnfant[r.enfant].nbAssures += 1; });
+  const seuil3125 = PLAFOND_AV + AV_AVANT_70.seuilTranche1;
+  return { rows, parEnfant, seuil3125, plafond: PLAFOND_AV };
 }
 
 // -------------------------------------------------------------

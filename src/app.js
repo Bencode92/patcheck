@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=71";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=71";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=71";
-import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine } from "./optim.js?v=71";
-import * as sync from "./sync.js?v=71";
-import { askAI } from "./ai.js?v=71";
+} from "./data.js?v=72";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=72";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=72";
+import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant } from "./optim.js?v=72";
+import * as sync from "./sync.js?v=72";
+import { askAI } from "./ai.js?v=72";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -746,6 +746,33 @@ async function renderOrganigramme() {
       }).join("")}</div></div>`;
   }
 
+  // ---- ⑦bis AV après décès — plafonds 990 I PAR ASSURÉ → enfant ----
+  // Le seuil 852 500 € (152 500 abatt + 700 000 à 20 %) s'apprécie par couple
+  // assuré→bénéficiaire : chaque parent ouvre un plafond distinct pour chaque enfant.
+  let avAssureCard = "";
+  const avPA = avParAssureEnfant(state);
+  if (avPA.rows.length) {
+    const palTag = (p) => p === "franchise" ? '<span class="badge ok">0 %</span>' : p === "20" ? '<span class="badge" style="background:#fdf3e4;color:#96570a;border-color:#f3ddba">20 %</span>' : '<span class="badge" style="background:#ffe0dd;color:#b42318;border-color:#f3b8b0">31,25 %</span>';
+    const capes = avPA.rows.filter((r) => r.palier === "31.25");
+    avAssureCard = `<div class="card">
+      <div class="section-head"><div><h2>🛡️ Après décès — plafonds 990 I par assuré</h2><div class="small muted">Le plafond <b>852 500 €</b> (abattement 152 500 € + 700 000 € à 20 %) s'apprécie <b>par couple assuré → enfant</b>. Chaque parent ouvre un plafond <b>distinct</b> : un enfant peut recevoir jusqu'à 852 500 € de <b>chacun</b> de vous en restant à 20 %. Au-delà, c'est 31,25 %.</div></div></div>
+      <div class="table-wrap"><table class="grid2">
+        <thead><tr><th>Assuré (au décès)</th><th>Enfant</th><th>Capital 990 I reçu</th><th>Palier</th><th>Reste avant 31,25 %</th><th>Droits</th></tr></thead>
+        <tbody>${avPA.rows.map((r) => `<tr>
+          <td>${r.assure}</td><td><b>${r.enfant}</b></td>
+          <td class="num">${eur(r.capital)}</td>
+          <td>${palTag(r.palier)}</td>
+          <td class="num ${r.capaciteAvant3125 > 0 ? "pos" : "neg"}">${r.capaciteAvant3125 > 0 ? eur(r.capaciteAvant3125) : "0 € ⚠️ capé"}</td>
+          <td class="num droits">${eur(r.droits)}</td>
+        </tr>`).join("")}</tbody>
+      </table></div>
+      ${capes.length
+        ? `<div class="small" style="margin-top:10px"><span class="badge warn">Plafond 20 % dépassé</span> ${capes.map((r) => `<b>${r.enfant}</b> (via ${r.assure})`).join(", ")} bascule(nt) à <b>31,25 %</b> — chaque euro d'AV supplémentaire de cet assuré vers cet enfant est taxé à 31,25 %. Réoriente vers un enfant/assuré au plafond libre.</div>`
+        : `<div class="small muted" style="margin-top:10px">✅ Aucune jambe assuré→enfant ne dépasse le plafond des 20 % — tout ton capital 990 I reste dans la tranche à 20 %.</div>`}
+      <p class="small muted" style="margin-top:8px">ℹ️ Cette vue <b>par assuré</b> est la plus juste fiscalement (chaque parent = abattement + tranche 20 % distincts). Le « Total droits AV » de la synthèse, lui, agrège par bénéficiaire — estimation <b>prudente</b> (souvent plus élevée) quand deux parents assurent le même enfant.</p>
+    </div>`;
+  }
+
   // ---- Scénarios ----
   let scenarios = "";
   if (d.scenarios) {
@@ -811,6 +838,7 @@ async function renderOrganigramme() {
     ${recapEnfants}
     ${fiche}
     ${avCard}
+    ${avAssureCard}
     ${scenarios}
     ${quiPossede}
     ${recoCard}

@@ -1,7 +1,7 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=71";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=72";
 
 // Année de naissance : la DATE complète prime (plus précise), puis année seule, puis âge
 function birthYear(p) {
@@ -22,7 +22,7 @@ function ageDePers(p, anneeRef) {
 //  - AV classique : selon le flag saisi (primes versées avant/après 70 ans).
 //  - PER assurantiel (a.per) : selon l'âge du SOUSCRIPTEUR au décès (< 70 → 990 I,
 //    ≥ 70 → 757 B). On utilise l'âge courant comme proxy du « décès aujourd'hui/demain ».
-function avAvant70Effectif(a, personnes) {
+export function avAvant70Effectif(a, personnes) {
   if (!a || !a.per) return !!(a && a.avant70);
   const sousc = personnes.find((p) => p.id === a.souscripteurId);
   const age = ageDePers(sousc);
