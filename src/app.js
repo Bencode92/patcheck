@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=73";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=73";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=73";
-import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant } from "./optim.js?v=73";
-import * as sync from "./sync.js?v=73";
-import { askAI } from "./ai.js?v=73";
+} from "./data.js?v=74";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=74";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=74";
+import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant } from "./optim.js?v=74";
+import * as sync from "./sync.js?v=74";
+import { askAI } from "./ai.js?v=74";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -755,7 +755,18 @@ async function renderOrganigramme() {
     const palTag = (p) => p === "franchise" ? '<span class="badge ok">0 %</span>' : p === "20" ? '<span class="badge" style="background:#fdf3e4;color:#96570a;border-color:#f3ddba">20 %</span>' : '<span class="badge" style="background:#ffe0dd;color:#b42318;border-color:#f3b8b0">31,25 %</span>';
     const capes = avPA.rows.filter((r) => r.palier === "31.25");
     avAssureCard = `<div class="card">
-      <div class="section-head"><div><h2>🛡️ Après décès — plafonds 990 I par assuré</h2><div class="small muted">Le plafond <b>852 500 €</b> (abattement 152 500 € + 700 000 € à 20 %) s'apprécie <b>par couple assuré → enfant</b>. Chaque parent ouvre un plafond <b>distinct</b> : un enfant peut recevoir jusqu'à 852 500 € de <b>chacun</b> de vous en restant à 20 %. Au-delà, c'est 31,25 %.</div></div></div>
+      <div class="section-head"><div><h2>🛡️ Après décès — combien d'AV pour chaque enfant</h2><div class="small muted">Destination finale du capital (clause « conjoint à défaut enfants » incluse : reçu par les enfants au 2ᵈ décès). Le plafond <b>852 500 €</b> (abattement 152 500 € + 700 000 € à 20 %) s'apprécie <b>par couple assuré → enfant</b> — chaque parent ouvre un plafond distinct. Au-delà : 31,25 %.</div></div></div>
+      <div class="benef-cards">${avPA.parEnfant.map((r) => {
+        const full = r.capaciteAvant3125 <= 0;
+        return `<div class="benef-card">
+          <div class="nom">${r.enfant}</div>
+          <div class="cap-recu num">${eur(r.capital)}</div>
+          <div class="kv"><span class="k">Reçu en AV (avant 70)</span><span class="v num">${eur(r.capital)}</span></div>
+          <div class="kv"><span class="k">Droits 990 I estimés</span><span class="v num ${r.droits > 0 ? "neg" : "pos"}">${eur(r.droits)}</span></div>
+          <div class="kv total"><span class="k">${full ? "⚠️ Plafond 20 % atteint" : "Peut encore recevoir à 20 %"}</span><span class="v num ${full ? "neg" : "pos"}">${full ? "FULL" : eur(r.capaciteAvant3125)}</span></div>
+        </div>`;
+      }).join("")}</div>
+      <h3 style="margin:16px 0 6px">Détail par assuré → enfant</h3>
       <div class="table-wrap"><table class="grid2">
         <thead><tr><th>Assuré (au décès)</th><th>Enfant</th><th>Capital 990 I reçu</th><th>Palier</th><th>Reste avant 31,25 %</th><th>Droits</th></tr></thead>
         <tbody>${avPA.rows.map((r) => `<tr>

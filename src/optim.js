@@ -3,11 +3,11 @@
 //  Consomme debrief(state) + barèmes data.js. Zéro DOM.
 //  Tout est INDICATIF, à valider avec un notaire.
 // =============================================================
-import { debrief, avAvant70Effectif } from "./graph.js?v=73";
+import { debrief, avAvant70Effectif } from "./graph.js?v=74";
 import {
   ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70,
   BAREME_LIGNE_DIRECTE, calculDroits, tauxUsufruit,
-} from "./data.js?v=73";
+} from "./data.js?v=74";
 
 const PLAFOND_AV = AV_AVANT_70.abattement; // 152 500 € / bénéficiaire (990 I)
 
@@ -103,12 +103,22 @@ export function avParAssureEnfant(state) {
   const legs = {}; // "assuré|enfantId" -> capital 990 I
   // Réconciliation avec le TOTAL des contrats saisis (pour ne rien masquer)
   let totalAvGlobal = 0, apres70 = 0, versAutres = 0, sansBeneficiaire = 0;
+  const tousEnfants = enfants.map((e) => e.id);
   av.forEach((a) => {
     const m = Number(a.montant) || 0;
     totalAvGlobal += m;
     if (!m) return;
     if (!avAvant70Effectif(a, personnes)) { apres70 += m; return; } // après 70 ans (757 B) : autre régime
-    const bensAll = a.beneficiaires || [];
+    // Bénéficiaires FINAUX côté enfants :
+    //  - clause « conjoint à défaut enfants » : le conjoint reçoit exonéré au 1er décès,
+    //    puis les enfants « à défaut » au 2d → destination finale = enfants. Liste à défaut
+    //    vide → on suppose TOUS les enfants (parts égales).
+    //  - clause désignée : liste telle quelle (enfants + éventuels autres).
+    let bensAll = a.beneficiaires || [];
+    if (a.clauseType === "conjoint_defaut_enfants") {
+      const kids = bensAll.filter(estEnfant);
+      bensAll = kids.length ? kids : tousEnfants;
+    }
     if (!bensAll.length) { sansBeneficiaire += m; return; }
     const rep = a.repartition || {};
     const tot = bensAll.reduce((s, b) => s + (Number(rep[b]) || 0), 0);
@@ -132,9 +142,16 @@ export function avParAssureEnfant(state) {
     };
   }).sort((a, b) => a.enfant.localeCompare(b.enfant) || b.capital - a.capital);
   const totalCouvert = rows.reduce((s, r) => s + r.capital, 0);
-  // Récap par enfant (somme des jambes, chacune avec ses propres plafonds)
-  const parEnfant = {};
-  rows.forEach((r) => { (parEnfant[r.enfant] ||= { capital: 0, droits: 0, nbAssures: 0 }); parEnfant[r.enfant].capital += r.capital; parEnfant[r.enfant].droits += r.droits; parEnfant[r.enfant].nbAssures += 1; });
+  // Récap par enfant (somme des jambes ; capacité restante = cumul des places à 20 % sur chaque jambe)
+  const parEnfantMap = {};
+  rows.forEach((r) => {
+    (parEnfantMap[r.enfant] ||= { enfant: r.enfant, capital: 0, droits: 0, nbAssures: 0, capaciteAvant3125: 0 });
+    parEnfantMap[r.enfant].capital += r.capital;
+    parEnfantMap[r.enfant].droits += r.droits;
+    parEnfantMap[r.enfant].nbAssures += 1;
+    parEnfantMap[r.enfant].capaciteAvant3125 += r.capaciteAvant3125;
+  });
+  const parEnfant = Object.values(parEnfantMap).sort((a, b) => b.capital - a.capital);
   return { rows, parEnfant, seuil3125, plafond: PLAFOND_AV, totalAvGlobal, totalCouvert, apres70, versAutres, sansBeneficiaire };
 }
 
