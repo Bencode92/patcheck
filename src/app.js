@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=80";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=80";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=80";
-import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation } from "./optim.js?v=80";
-import * as sync from "./sync.js?v=80";
-import { askAI } from "./ai.js?v=80";
+} from "./data.js?v=81";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=81";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=81";
+import { arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation } from "./optim.js?v=81";
+import * as sync from "./sync.js?v=81";
+import { askAI } from "./ai.js?v=81";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1999,7 +1999,6 @@ function renderOptimiseur() {
   // les donations passées, calculé automatiquement)
   const abattParEnfantNow = abattementMoyenADate(state, 0);
 
-  const avOpt = optimiserAV(state);
   const timing = timingDonations(state);
   const biens = actifsTransmissiblesParents(state);
 
@@ -2028,50 +2027,42 @@ function renderOptimiseur() {
       <p class="muted small" style="margin-top:10px">⚠️ Tous les montants sont <b>indicatifs</b> et reposent sur des hypothèses (revalorisation, âges, ordre des décès). À valider avec un notaire.</p>
     </div>`;
 
-  // --- Carte AV : plafonds 990 I, paliers 20 %/31,25 % & reventilation
-  // Badge du palier marginal actuel
-  const palierBadge = (p) => p === "franchise" ? '<span class="badge ok">franchise</span>' : p === "20" ? '<span class="badge" style="background:#fdf3e4;color:#96570a;border-color:#f3ddba">20 %</span>' : '<span class="badge" style="background:#ffe0dd;color:#b42318;border-color:#f3b8b0">31,25 %</span>';
-  // Jauge des 3 zones (franchise / 20 % / 31,25 %), échelle partagée pour comparer les têtes
-  const maxCap = Math.max(0, ...avOpt.lignes.map((l) => l.capital));
-  const gaugeMax = Math.max(avOpt.seuil3125 * 1.25, maxCap * 1.08, 1);
-  const w = (montant) => (montant / gaugeMax * 100).toFixed(1);
-  const gauge = (l) => `
-    <div class="avg-wrap">
-      <div class="avg-head"><b>${l.nom}</b> <span class="muted small">${eur2(l.capital)} reçu · palier ${palierBadge(l.palier)}</span></div>
-      <div class="avg-track">
-        <div class="avg-seg z0" style="width:${w(avOpt.plafond)}%"></div>
-        <div class="avg-seg z20" style="width:${w(AV_AVANT_70.seuilTranche1)}%"></div>
-        <div class="avg-seg z31" style="width:${(100 - w(avOpt.plafond) - w(AV_AVANT_70.seuilTranche1)).toFixed(1)}%"></div>
-        <div class="avg-mark" style="left:${Math.min(98.5, l.capital / gaugeMax * 100).toFixed(1)}%"></div>
-      </div>
-      <div class="avg-foot muted small">${l.capaciteAvant3125 > 0
-        ? `Reste <b style="color:var(--accent-2)">${eur2(l.capaciteAvant3125)}</b> de capital avant de basculer à <b>31,25 %</b> — au-delà, mieux vaut arrêter d'alimenter l'AV sur cette tête.`
-        : `<span style="color:var(--warn)">⚠️ Palier 31,25 % atteint</span> — chaque euro supplémentaire est taxé à 31,25 %. Stop AV recommandé sur cette tête (basculer sur une autre).`}</div>
-    </div>`;
-  const avRows = avOpt.lignes.map((l) => `
-    <tr>
-      <td>${l.nom}${l.estHeritier ? "" : ' <span class="muted small">(hors héritiers)</span>'}</td>
-      <td class="num">${eur2(l.capital)}</td>
-      <td>${palierBadge(l.palier)}</td>
-      <td class="num">${l.capaciteAvant3125 > 0 ? `<span style="color:var(--accent-2)">${eur2(l.capaciteAvant3125)}</span>` : `<span style="color:var(--warn)">0 €</span>`}</td>
-      <td class="num droits">${eur2(l.droits)}</td>
-    </tr>`).join("");
-  const avCard = avOpt.lignes.length ? `
+  // --- Carte AV : marge avant 31,25 %, sur la DESTINATION FINALE (tous contrats avant 70,
+  // y compris « conjoint à défaut enfants » reçus au 2ᵈ décès), par assuré → enfant.
+  const palTagO = (p) => p === "franchise" ? '<span class="badge ok">franchise 0 %</span>' : p === "20" ? '<span class="badge" style="background:#fdf3e4;color:#96570a;border-color:#f3ddba">20 %</span>' : '<span class="badge" style="background:#ffe0dd;color:#b42318;border-color:#f3b8b0">31,25 %</span>';
+  const avPAo = avParAssureEnfant(state);
+  const nbDiffO = avPAo.rows.filter((r) => r.differe).length;
+  const avCard = avPAo.rows.length ? `
     <div class="card">
-      <h2>🛡️ Assurance-vie — paliers 990 I & reventilation <span class="muted small">abatt. 152 500 € · 20 % → 700 000 € · 31,25 % au-delà</span></h2>
-      <div class="table-wrap"><table class="grid2">
-        <thead><tr><th>Bénéficiaire</th><th>Capital reçu (avant 70)</th><th>Palier marginal</th><th>Reste avant 31,25 %</th><th>Droits</th></tr></thead>
-        <tbody>${avRows}</tbody>
-      </table></div>
-      <div class="avg-list">${avOpt.lignes.filter((l) => l.estHeritier || l.capital > 0).map(gauge).join("")}</div>
-      <div class="optim-verdict" style="margin-top:12px">
-        <div class="line"><span>Droits AV actuels (répartition en place)</span><b>${eur2(avOpt.droitsActuels)}</b></div>
-        <div class="line"><span>Droits AV si répartition optimale entre ${avOpt.nHeirs} enfant(s)</span><b>${eur2(avOpt.droitsCible)}</b></div>
-        <div class="line total"><span>Économie possible en reventilant</span><b style="color:var(--accent-2)">${eur2(avOpt.economie)}</b></div>
+      <h2>🛡️ Assurance-vie — ta marge avant 31,25 % <span class="muted small">abatt. 152 500 € · 20 % → 700 000 € · 31,25 % au-delà</span></h2>
+      <p class="muted small">Sur <b>TOUS</b> tes contrats avant 70 ans à leur <b>destination finale chez les enfants</b> — clause « conjoint à défaut » comprise (reçue au 2ᵈ décès). Plafond 852 500 € <b>par assuré → enfant</b> (chaque parent ouvre le sien, non cumulables au niveau de l'enfant).</p>
+      <div class="cockpit" style="grid-template-columns:repeat(2,1fr);margin-bottom:14px">
+        <div class="kpi2 good"><div class="lbl">Marge encore plaçable à 20 %</div><div class="val num">${eur2(avPAo.margeTotale)}</div><div class="sub">avant de taper le palier 31,25 % (total toutes jambes)</div></div>
+        <div class="kpi2"><div class="lbl">Capital 990 I déjà destiné aux enfants</div><div class="val num">${eur2(avPAo.totalCouvert)}</div><div class="sub">droits estimés ${eur2(avPAo.totalDroits)}</div></div>
       </div>
-      ${avOpt.suggestions.length ? `<div class="optim-sugg"><b>💡 Reventilation suggérée</b><ul style="margin:6px 0 0;padding-left:20px">${avOpt.suggestions.map((s) => `<li>${s}</li>`).join("")}</ul><p class="muted small" style="margin-top:8px">Reventiler = modifier la <b>clause bénéficiaire</b> auprès de l'assureur (souscrire/répartir sur d'autres têtes). À faire par écrit, à valider.</p></div>` : (avOpt.economie <= 0 ? `<p class="muted small" style="margin-top:8px">✅ Répartition déjà efficace : aucun bénéficiaire ne dépasse le plafond de façon coûteuse.</p>` : "")}
+      <div class="table-wrap"><table class="grid2">
+        <thead><tr><th>Assuré (au décès)</th><th>Enfant</th><th>Capital 990 I</th><th>Palier</th><th>Reste avant 31,25 %</th><th>Droits</th></tr></thead>
+        <tbody>${avPAo.rows.map((r) => `<tr>
+          <td>${r.assure}</td><td><b>${r.enfant}</b>${r.differe ? ' <span class="badge neutral" title="Clause conjoint à défaut : reçu au 2ᵈ décès">2ᵈ décès</span>' : ""}</td>
+          <td class="num">${eur2(r.capital)}</td>
+          <td>${palTagO(r.palier)}</td>
+          <td class="num ${r.capaciteAvant3125 > 0 ? "pos" : "neg"}">${r.capaciteAvant3125 > 0 ? `<span style="color:var(--accent-2)">${eur2(r.capaciteAvant3125)}</span>` : `<span style="color:var(--warn)">0 € ⚠️</span>`}</td>
+          <td class="num droits">${eur2(r.droits)}</td>
+        </tr>`).join("")}</tbody>
+      </table></div>
+      <div class="fiche" style="margin-top:12px">
+        <div class="row"><span class="k">💡 Marge encore plaçable à 20 %, par parent-assuré</span><span class="v"></span></div>
+        ${avPAo.margeParAssure.map((m) => `<div class="row sub"><span class="k">${m.assure} — déjà destiné ${eur2(m.capital)}</span><span class="v num pos">reste ${eur2(m.marge)}</span></div>`).join("")}
+      </div>
+      ${nbDiffO > 0 ? `<p class="small muted" style="margin-top:8px">ℹ️ Les lignes <span class="badge neutral">2ᵈ décès</span> = contrats « conjoint à défaut » : comptés à destination finale enfants (reçus au décès du 2ᵈ parent).</p>` : ""}
+      ${(avPAo.apres70 > 0 || avPAo.sansBeneficiaire > 0) ? `<div class="fiche" style="margin-top:10px">
+        <div class="row"><span class="k">Total contrats saisis</span><span class="v num">${eur2(avPAo.totalAvGlobal)}</span></div>
+        ${avPAo.apres70 > 0 ? `<div class="row sub"><span class="k">↪ après 70 ans (757 B — autre régime, non compté ici)</span><span class="v num">${eur2(avPAo.apres70)}</span></div>` : ""}
+        ${avPAo.versAutres > 0 ? `<div class="row sub"><span class="k">↪ part vers conjoint / autres (hors enfants)</span><span class="v num">${eur2(avPAo.versAutres)}</span></div>` : ""}
+        ${avPAo.sansBeneficiaire > 0 ? `<div class="row sub"><span class="k">⚠️ sans bénéficiaire renseigné</span><span class="v num" style="color:var(--warn)">${eur2(avPAo.sansBeneficiaire)}</span></div>` : ""}
+      </div>` : ""}
     </div>` : `
-    <div class="card"><h2>🛡️ Assurance-vie — plafonds</h2><p class="muted">Aucun capital d'assurance-vie « avant 70 ans » (990 I) avec bénéficiaire renseigné. Renseigne tes contrats dans l'onglet Assurance-vie.</p></div>`;
+    <div class="card"><h2>🛡️ Assurance-vie — plafonds</h2><p class="muted">Aucun capital d'assurance-vie « avant 70 ans » (990 I) destiné aux enfants. Renseigne tes contrats dans l'onglet Assurance-vie.</p></div>`;
 
   // --- Carte démembrement : maintenant vs attendre la recharge d'abattement vs succession
   // Horizon d'attente = délai avant recharge COMPLÈTE de l'abattement (15 ans après la
