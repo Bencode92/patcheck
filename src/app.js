@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=83";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=83";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=83";
-import { arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation } from "./optim.js?v=83";
-import * as sync from "./sync.js?v=83";
-import { askAI } from "./ai.js?v=83";
+} from "./data.js?v=84";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=84";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=84";
+import { arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation } from "./optim.js?v=84";
+import * as sync from "./sync.js?v=84";
+import { askAI } from "./ai.js?v=84";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -769,7 +769,16 @@ async function renderOrganigramme() {
       ${capes
         ? `<div class="small" style="margin:0 0 10px"><span class="badge warn">Plafond 20 % dépassé</span> une part bascule à <b>31,25 %</b> — réoriente les prochains versements.</div>`
         : `<div class="optim-verdict" style="margin:0 0 10px">✅ <b>Aucun enfant ne dépasse le plafond des 20 %</b> — toute ton AV (${eur(avPA.totalCouvert)}) est à <b>20 % ou en franchise</b>, rien au palier 31,25 %.</div>`}
-      <details><summary class="muted small" style="cursor:pointer;margin-bottom:6px">Détail par assuré → enfant (le plafond s'ouvre par parent)</summary>
+      <h3 style="margin:4px 0 8px">👤 Ce que chaque parent peut encore verser en AV à 20 %</h3>
+      <div class="cockpit" style="grid-template-columns:repeat(${Math.min(3, avPA.margeParAssure.length)},1fr);margin-bottom:14px">
+        ${avPA.margeParAssure.map((m) => `<div class="kpi2 ${m.marge > 0 ? "good" : "alert"}">
+          <div class="lbl">${m.assure} — peut encore verser</div>
+          <div class="val num">${eur(m.marge)}</div>
+          <div class="sub">déjà destiné ${eur(m.capital)} · ≈ ${eur(m.marge / Math.max(1, avPA.parEnfant.length))} par enfant</div>
+        </div>`).join("")}
+      </div>
+      <p class="muted small" style="margin:-6px 0 10px">C'est le <b>chiffre qui compte pour décider</b> : chaque parent ouvre son propre plafond de 852 500 € par enfant. « Peut encore verser » = cumul de ses plafonds restants sur les 3 enfants.</p>
+      <details><summary class="muted small" style="cursor:pointer;margin-bottom:6px">Détail jambe par jambe (assuré → enfant)</summary>
       <div class="table-wrap"><table class="grid2">
         <thead><tr><th>Assuré</th><th>Enfant</th><th>Capital 990 I</th><th>Palier</th><th>Reste avant 31,25 %</th><th>Droits</th></tr></thead>
         <tbody>${avPA.rows.map((r) => `<tr>
@@ -2049,8 +2058,17 @@ function renderOptimiseur() {
       }).join("")}</div>
       ${avPAo.rows.some((r) => r.palier === "31.25")
         ? `<div class="optim-verdict" style="margin:0 0 12px;border-left-color:var(--warn)">⚠️ <b>Une ou plusieurs jambes dépassent le palier des 20 %</b> — la part au-delà de 852 500 € (par assuré → enfant) est taxée à <b>31,25 %</b>. Mieux vaut réorienter les prochains versements. Droits 990 I estimés : <b>${eur2(avPAo.totalDroits)}</b>.</div>`
-        : `<div class="optim-verdict" style="margin:0 0 12px">✅ <b>Aucun enfant ne dépasse le plafond des 20 %</b> — toute ton AV avant 70 ans (${eur2(avPAo.totalCouvert)}) est taxée à <b>20 % ou en franchise</b>, rien au palier 31,25 %. Chaque enfant peut encore recevoir la somme ci-dessus à 20 % (cumul des plafonds de ses 2 parents-assurés). Droits 990 I estimés : <b>${eur2(avPAo.totalDroits)}</b>.</div>`}
-      <details><summary class="muted small" style="cursor:pointer;margin-bottom:6px">Détail par assuré → enfant (le plafond s'ouvre par parent)</summary>
+        : `<div class="optim-verdict" style="margin:0 0 12px">✅ <b>Aucun enfant ne dépasse le plafond des 20 %</b> — toute ton AV avant 70 ans (${eur2(avPAo.totalCouvert)}) est à <b>20 % ou en franchise</b>, rien au palier 31,25 %. Droits 990 I estimés : <b>${eur2(avPAo.totalDroits)}</b>.</div>`}
+      <h3 style="margin:4px 0 8px">👤 Ce que chaque parent peut encore verser en AV à 20 %</h3>
+      <div class="cockpit" style="grid-template-columns:repeat(${Math.min(3, avPAo.margeParAssure.length)},1fr);margin-bottom:14px">
+        ${avPAo.margeParAssure.map((m) => `<div class="kpi2 ${m.marge > 0 ? "good" : "alert"}">
+          <div class="lbl">${m.assure} — peut encore verser</div>
+          <div class="val num">${eur2(m.marge)}</div>
+          <div class="sub">déjà destiné ${eur2(m.capital)} · ≈ ${eur2(m.marge / Math.max(1, avPAo.parEnfant.length))} par enfant</div>
+        </div>`).join("")}
+      </div>
+      <p class="muted small" style="margin:-6px 0 10px">C'est le <b>chiffre qui compte pour décider</b> : chaque parent ouvre son propre plafond de 852 500 € sur chaque enfant. « Peut encore verser » = cumul de ses plafonds restants sur les 3 enfants (réparti librement entre eux).</p>
+      <details><summary class="muted small" style="cursor:pointer;margin-bottom:6px">Détail jambe par jambe (assuré → enfant)</summary>
       <div class="table-wrap"><table class="grid2">
         <thead><tr><th>Assuré (au décès)</th><th>Enfant</th><th>Capital 990 I</th><th>Palier</th><th>Reste avant 31,25 %</th><th>Droits</th></tr></thead>
         <tbody>${avPAo.rows.map((r) => `<tr>
@@ -2060,11 +2078,7 @@ function renderOptimiseur() {
           <td class="num ${r.capaciteAvant3125 > 0 ? "pos" : "neg"}">${r.capaciteAvant3125 > 0 ? `<span style="color:var(--accent-2)">${eur2(r.capaciteAvant3125)}</span>` : `<span style="color:var(--warn)">0 € ⚠️</span>`}</td>
           <td class="num droits">${eur2(r.droits)}</td>
         </tr>`).join("")}</tbody>
-      </table></div>
-      <div class="fiche" style="margin-top:10px">
-        <div class="row"><span class="k">Marge par parent-assuré</span><span class="v"></span></div>
-        ${avPAo.margeParAssure.map((m) => `<div class="row sub"><span class="k">${m.assure} — déjà destiné ${eur2(m.capital)}</span><span class="v num pos">reste ${eur2(m.marge)}</span></div>`).join("")}
-      </div></details>
+      </table></div></details>
       <div class="fiche" style="margin-top:12px">
         <div class="row"><span class="k">Total de tes contrats d'assurance-vie</span><span class="v num">${eur2(avPAo.totalAvGlobal)}</span></div>
         <div class="row sub"><span class="k">✅ avant 70 ans (990 I), supposé chez les enfants</span><span class="v num">${eur2(avPAo.totalCouvert)}</span></div>
