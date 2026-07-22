@@ -3,11 +3,11 @@
 //  Consomme debrief(state) + barèmes data.js. Zéro DOM.
 //  Tout est INDICATIF, à valider avec un notaire.
 // =============================================================
-import { debrief, avAvant70Effectif } from "./graph.js?v=81";
+import { debrief, avAvant70Effectif } from "./graph.js?v=82";
 import {
   ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70,
   BAREME_LIGNE_DIRECTE, calculDroits, tauxUsufruit,
-} from "./data.js?v=81";
+} from "./data.js?v=82";
 
 const PLAFOND_AV = AV_AVANT_70.abattement; // 152 500 € / bénéficiaire (990 I)
 
@@ -94,7 +94,12 @@ export function optimiserAV(state) {
 // Vue « après décès » : capital 990 I reçu par chaque enfant, VENTILÉ PAR ASSURÉ.
 // Le plafond 152 500 € (abattement) PUIS 700 000 € à 20 % (bascule 31,25 % à 852 500 €)
 // s'apprécie par COUPLE assuré → bénéficiaire : chaque parent ouvre un plafond distinct.
-export function avParAssureEnfant(state) {
+export function avParAssureEnfant(state, opts = {}) {
+  // opts.supposeToutAuxEnfants (défaut true) : SCÉNARIO « rien n'est consommé » —
+  // on suppose que le conjoint ne dépense rien et que TOUT finit chez les enfants.
+  // Les contrats sans bénéficiaire renseigné sont alors répartis entre les enfants
+  // (marqués « supposé enfants »), au lieu d'être laissés de côté.
+  const supposeTout = opts.supposeToutAuxEnfants !== false;
   const personnes = state.personnes || [];
   const av = state.av || [];
   const enfants = personnes.filter((p) => p.role === "enfant");
@@ -102,9 +107,9 @@ export function avParAssureEnfant(state) {
   const nom = (id) => personnes.find((p) => p.id === id)?.nom || id;
   const legs = {}; // "assuré|enfantId" -> capital 990 I
   // Réconciliation avec le TOTAL des contrats saisis (pour ne rien masquer)
-  let totalAvGlobal = 0, apres70 = 0, versAutres = 0, sansBeneficiaire = 0;
+  let totalAvGlobal = 0, apres70 = 0, versAutres = 0, sansBeneficiaire = 0, supposeEnfants = 0;
   const tousEnfants = enfants.map((e) => e.id);
-  const legInfo = {}; // "assuré|enfantId" -> { differe: bool } (differe = reçu au 2d décès)
+  const legInfo = {}; // "assuré|enfantId" -> { differe, suppose }
   av.forEach((a) => {
     const m = Number(a.montant) || 0;
     totalAvGlobal += m;
@@ -113,15 +118,19 @@ export function avParAssureEnfant(state) {
     // Bénéficiaires FINAUX côté enfants :
     //  - clause « conjoint à défaut enfants » : le conjoint reçoit exonéré au 1er décès,
     //    puis les enfants « à défaut » au 2d → destination finale = enfants (reçu PLUS TARD).
-    //    Liste à défaut vide → on suppose TOUS les enfants (parts égales).
     //  - clause désignée : liste telle quelle (enfants + éventuels autres).
+    //  - sans bénéficiaire + scénario « tout aux enfants » : réparti entre les enfants (supposé).
     const differe = a.clauseType === "conjoint_defaut_enfants"; // reçu au 2d décès
     let bensAll = a.beneficiaires || [];
+    let suppose = false;
     if (differe) {
       const kids = bensAll.filter(estEnfant);
       bensAll = kids.length ? kids : tousEnfants;
     }
-    if (!bensAll.length) { sansBeneficiaire += m; return; }
+    if (!bensAll.length) {
+      if (supposeTout && tousEnfants.length) { bensAll = tousEnfants; suppose = true; supposeEnfants += m; }
+      else { sansBeneficiaire += m; return; }
+    }
     const rep = a.repartition || {};
     const tot = bensAll.reduce((s, b) => s + (Number(rep[b]) || 0), 0);
     const assure = a.cosouscripteurId ? `${nom(a.souscripteurId)} + ${nom(a.cosouscripteurId)}` : nom(a.souscripteurId);
@@ -132,7 +141,9 @@ export function avParAssureEnfant(state) {
       if (estEnfant(b)) {
         const key = `${assure}|${b}`;
         legs[key] = (legs[key] || 0) + m * share;
-        (legInfo[key] ||= { differe: false }).differe = legInfo[key].differe || differe;
+        (legInfo[key] ||= { differe: false, suppose: false });
+        legInfo[key].differe = legInfo[key].differe || differe;
+        legInfo[key].suppose = legInfo[key].suppose || suppose;
       } else versAutres += m * share;
     });
   });
@@ -143,6 +154,7 @@ export function avParAssureEnfant(state) {
     return {
       assure, enfant: nom(benId), capital, palier,
       differe: !!(legInfo[k] && legInfo[k].differe),
+      suppose: !!(legInfo[k] && legInfo[k].suppose),
       capaciteAvant3125: Math.max(0, seuil3125 - capital),
       droits: droits990(capital),
     };
@@ -169,7 +181,7 @@ export function avParAssureEnfant(state) {
   const margeParAssure = Object.values(margeParAssureMap).sort((a, b) => b.marge - a.marge);
   const margeTotale = rows.reduce((s, r) => s + r.capaciteAvant3125, 0);
   const totalDroits = rows.reduce((s, r) => s + r.droits, 0);
-  return { rows, parEnfant, seuil3125, plafond: PLAFOND_AV, totalAvGlobal, totalCouvert, apres70, versAutres, sansBeneficiaire, margeParAssure, margeTotale, totalDroits };
+  return { rows, parEnfant, seuil3125, plafond: PLAFOND_AV, totalAvGlobal, totalCouvert, apres70, versAutres, sansBeneficiaire, supposeEnfants, margeParAssure, margeTotale, totalDroits };
 }
 
 // Comparateur fiscal d'un CONTRAT DE CAPITALISATION : donation NP démembrée (A)

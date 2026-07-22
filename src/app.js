@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=81";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=81";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=81";
-import { arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation } from "./optim.js?v=81";
-import * as sync from "./sync.js?v=81";
-import { askAI } from "./ai.js?v=81";
+} from "./data.js?v=82";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=82";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=82";
+import { arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation } from "./optim.js?v=82";
+import * as sync from "./sync.js?v=82";
+import { askAI } from "./ai.js?v=82";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -764,7 +764,7 @@ async function renderOrganigramme() {
       <div class="table-wrap"><table class="grid2">
         <thead><tr><th>Assuré (au décès)</th><th>Enfant</th><th>Capital 990 I</th><th>Palier</th><th>Reste avant 31,25 %</th><th>Droits</th></tr></thead>
         <tbody>${avPA.rows.map((r) => `<tr>
-          <td>${r.assure}</td><td><b>${r.enfant}</b>${r.differe ? ' <span class="badge neutral" title="Clause conjoint à défaut : reçu au 2ᵈ décès">2ᵈ décès</span>' : ""}</td>
+          <td>${r.assure}</td><td><b>${r.enfant}</b>${r.differe ? ' <span class="badge neutral" title="Clause conjoint à défaut : reçu au 2ᵈ décès">2ᵈ décès</span>' : ""}${r.suppose ? ' <span class="badge warn" title="Contrat sans clause : supposé réparti entre les enfants">supposé</span>' : ""}</td>
           <td class="num">${eur(r.capital)}</td>
           <td>${palTag(r.palier)}</td>
           <td class="num ${r.capaciteAvant3125 > 0 ? "pos" : "neg"}">${r.capaciteAvant3125 > 0 ? eur(r.capaciteAvant3125) : "0 € ⚠️ capé"}</td>
@@ -2030,37 +2030,49 @@ function renderOptimiseur() {
   // --- Carte AV : marge avant 31,25 %, sur la DESTINATION FINALE (tous contrats avant 70,
   // y compris « conjoint à défaut enfants » reçus au 2ᵈ décès), par assuré → enfant.
   const palTagO = (p) => p === "franchise" ? '<span class="badge ok">franchise 0 %</span>' : p === "20" ? '<span class="badge" style="background:#fdf3e4;color:#96570a;border-color:#f3ddba">20 %</span>' : '<span class="badge" style="background:#ffe0dd;color:#b42318;border-color:#f3b8b0">31,25 %</span>';
-  const avPAo = avParAssureEnfant(state);
+  const avPAo = avParAssureEnfant(state); // scénario « rien consommé, tout aux enfants » (défaut)
   const nbDiffO = avPAo.rows.filter((r) => r.differe).length;
   const avCard = avPAo.rows.length ? `
     <div class="card">
-      <h2>🛡️ Assurance-vie — ta marge avant 31,25 % <span class="muted small">abatt. 152 500 € · 20 % → 700 000 € · 31,25 % au-delà</span></h2>
-      <p class="muted small">Sur <b>TOUS</b> tes contrats avant 70 ans à leur <b>destination finale chez les enfants</b> — clause « conjoint à défaut » comprise (reçue au 2ᵈ décès). Plafond 852 500 € <b>par assuré → enfant</b> (chaque parent ouvre le sien, non cumulables au niveau de l'enfant).</p>
-      <div class="cockpit" style="grid-template-columns:repeat(2,1fr);margin-bottom:14px">
-        <div class="kpi2 good"><div class="lbl">Marge encore plaçable à 20 %</div><div class="val num">${eur2(avPAo.margeTotale)}</div><div class="sub">avant de taper le palier 31,25 % (total toutes jambes)</div></div>
-        <div class="kpi2"><div class="lbl">Capital 990 I déjà destiné aux enfants</div><div class="val num">${eur2(avPAo.totalCouvert)}</div><div class="sub">droits estimés ${eur2(avPAo.totalDroits)}</div></div>
+      <h2>🛡️ Assurance-vie — combien chaque enfant reçoit & la marge <span class="muted small">abatt. 152 500 € · 20 % → 700 000 € · 31,25 % au-delà</span></h2>
+      <p class="muted small">Scénario <b>« rien n'est consommé »</b> : on suppose que le conjoint ne dépense rien et que <b>TOUTE</b> ton assurance-vie avant 70 ans finit chez les 3 enfants (clause « conjoint à défaut » et contrats sans clause compris). Le plafond 852 500 € s'apprécie <b>par assuré → enfant</b> (chaque parent ouvre le sien).</p>
+      <div class="benef-cards" style="margin-bottom:6px">${avPAo.parEnfant.map((e) => {
+        const full = e.capaciteAvant3125 <= 0;
+        return `<div class="benef-card">
+          <div class="nom">${e.enfant}</div>
+          <div class="cap-recu num">${eur2(e.capital)}</div>
+          <div class="kv"><span class="k">Reçu en AV (avant 70)</span><span class="v num">${eur2(e.capital)}</span></div>
+          <div class="kv"><span class="k">Droits 990 I estimés</span><span class="v num ${e.droits > 0 ? "neg" : "pos"}">${eur2(e.droits)}</span></div>
+          <div class="kv total"><span class="k">${full ? "⚠️ Plafond 20 % atteint" : "Peut encore recevoir à 20 %"}</span><span class="v num ${full ? "neg" : "pos"}">${full ? "FULL" : eur2(e.capaciteAvant3125)}</span></div>
+        </div>`;
+      }).join("")}</div>
+      <div class="cockpit" style="grid-template-columns:repeat(2,1fr);margin:12px 0 14px">
+        <div class="kpi2 good"><div class="lbl">Marge totale encore plaçable à 20 %</div><div class="val num">${eur2(avPAo.margeTotale)}</div><div class="sub">avant de taper le palier 31,25 %</div></div>
+        <div class="kpi2"><div class="lbl">Total AV destiné aux enfants</div><div class="val num">${eur2(avPAo.totalCouvert)}</div><div class="sub">droits estimés ${eur2(avPAo.totalDroits)}</div></div>
       </div>
+      <details><summary class="muted small" style="cursor:pointer;margin-bottom:6px">Détail par assuré → enfant (le plafond s'ouvre par parent)</summary>
       <div class="table-wrap"><table class="grid2">
         <thead><tr><th>Assuré (au décès)</th><th>Enfant</th><th>Capital 990 I</th><th>Palier</th><th>Reste avant 31,25 %</th><th>Droits</th></tr></thead>
         <tbody>${avPAo.rows.map((r) => `<tr>
-          <td>${r.assure}</td><td><b>${r.enfant}</b>${r.differe ? ' <span class="badge neutral" title="Clause conjoint à défaut : reçu au 2ᵈ décès">2ᵈ décès</span>' : ""}</td>
+          <td>${r.assure}</td><td><b>${r.enfant}</b>${r.differe ? ' <span class="badge neutral" title="Clause conjoint à défaut : reçu au 2ᵈ décès">2ᵈ décès</span>' : ""}${r.suppose ? ' <span class="badge warn" title="Contrat sans clause renseignée : supposé réparti entre les enfants">supposé</span>' : ""}</td>
           <td class="num">${eur2(r.capital)}</td>
           <td>${palTagO(r.palier)}</td>
           <td class="num ${r.capaciteAvant3125 > 0 ? "pos" : "neg"}">${r.capaciteAvant3125 > 0 ? `<span style="color:var(--accent-2)">${eur2(r.capaciteAvant3125)}</span>` : `<span style="color:var(--warn)">0 € ⚠️</span>`}</td>
           <td class="num droits">${eur2(r.droits)}</td>
         </tr>`).join("")}</tbody>
       </table></div>
-      <div class="fiche" style="margin-top:12px">
-        <div class="row"><span class="k">💡 Marge encore plaçable à 20 %, par parent-assuré</span><span class="v"></span></div>
+      <div class="fiche" style="margin-top:10px">
+        <div class="row"><span class="k">Marge par parent-assuré</span><span class="v"></span></div>
         ${avPAo.margeParAssure.map((m) => `<div class="row sub"><span class="k">${m.assure} — déjà destiné ${eur2(m.capital)}</span><span class="v num pos">reste ${eur2(m.marge)}</span></div>`).join("")}
-      </div>
-      ${nbDiffO > 0 ? `<p class="small muted" style="margin-top:8px">ℹ️ Les lignes <span class="badge neutral">2ᵈ décès</span> = contrats « conjoint à défaut » : comptés à destination finale enfants (reçus au décès du 2ᵈ parent).</p>` : ""}
-      ${(avPAo.apres70 > 0 || avPAo.sansBeneficiaire > 0) ? `<div class="fiche" style="margin-top:10px">
-        <div class="row"><span class="k">Total contrats saisis</span><span class="v num">${eur2(avPAo.totalAvGlobal)}</span></div>
+      </div></details>
+      <div class="fiche" style="margin-top:12px">
+        <div class="row"><span class="k">Total de tes contrats d'assurance-vie</span><span class="v num">${eur2(avPAo.totalAvGlobal)}</span></div>
+        <div class="row sub"><span class="k">✅ avant 70 ans (990 I), supposé chez les enfants</span><span class="v num">${eur2(avPAo.totalCouvert)}</span></div>
+        ${avPAo.supposeEnfants > 0 ? `<div class="row sub"><span class="k">↳ dont ${eur2(avPAo.supposeEnfants)} <span class="badge warn">supposé</span> — contrats sans clause renseignée dans l'app</span><span class="v"></span></div>` : ""}
         ${avPAo.apres70 > 0 ? `<div class="row sub"><span class="k">↪ après 70 ans (757 B — autre régime, non compté ici)</span><span class="v num">${eur2(avPAo.apres70)}</span></div>` : ""}
         ${avPAo.versAutres > 0 ? `<div class="row sub"><span class="k">↪ part vers conjoint / autres (hors enfants)</span><span class="v num">${eur2(avPAo.versAutres)}</span></div>` : ""}
-        ${avPAo.sansBeneficiaire > 0 ? `<div class="row sub"><span class="k">⚠️ sans bénéficiaire renseigné</span><span class="v num" style="color:var(--warn)">${eur2(avPAo.sansBeneficiaire)}</span></div>` : ""}
-      </div>` : ""}
+      </div>
+      ${avPAo.supposeEnfants > 0 ? `<p class="small muted" style="margin-top:8px">💡 ${eur2(avPAo.supposeEnfants)} de contrats sont marqués <span class="badge warn">supposé</span> : pas de clause renseignée dans l'app, on les suppose répartis entre tes 3 enfants (scénario « tout aux enfants »). Pour figer le calcul, renseigne leur clause dans l'onglet 🛡️ Assurance-vie.</p>` : ""}
     </div>` : `
     <div class="card"><h2>🛡️ Assurance-vie — plafonds</h2><p class="muted">Aucun capital d'assurance-vie « avant 70 ans » (990 I) destiné aux enfants. Renseigne tes contrats dans l'onglet Assurance-vie.</p></div>`;
 
