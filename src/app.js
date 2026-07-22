@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=82";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=82";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=82";
-import { arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation } from "./optim.js?v=82";
-import * as sync from "./sync.js?v=82";
-import { askAI } from "./ai.js?v=82";
+} from "./data.js?v=83";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=83";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=83";
+import { arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation } from "./optim.js?v=83";
+import * as sync from "./sync.js?v=83";
+import { askAI } from "./ai.js?v=83";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -753,40 +753,41 @@ async function renderOrganigramme() {
   const avPA = avParAssureEnfant(state);
   if (avPA.rows.length) {
     const palTag = (p) => p === "franchise" ? '<span class="badge ok">0 %</span>' : p === "20" ? '<span class="badge" style="background:#fdf3e4;color:#96570a;border-color:#f3ddba">20 %</span>' : '<span class="badge" style="background:#ffe0dd;color:#b42318;border-color:#f3b8b0">31,25 %</span>';
-    const capes = avPA.rows.filter((r) => r.palier === "31.25");
-    const nbDiffere = avPA.rows.filter((r) => r.differe).length;
+    const capes = avPA.rows.some((r) => r.palier === "31.25");
     avAssureCard = `<div class="card">
-      <div class="section-head"><div><h2>🛡️ Assurance-vie — ta marge avant le palier 31,25 %</h2><div class="small muted">Tous tes contrats <b>avant 70 ans</b> (990 I), à leur <b>destination finale chez les enfants</b> — clause « conjoint à défaut enfants » incluse : ils passent d'abord par le conjoint au 1ᵉʳ décès (exonéré) puis reviennent aux enfants <b>au 2ᵈ décès</b>. Le plafond <b>852 500 €</b> (abattement 152 500 € + 700 000 € à 20 %) s'apprécie <b>par assuré → enfant</b> — chaque parent ouvre son propre plafond, ils ne se cumulent PAS au niveau de l'enfant. Au-delà : 31,25 %.</div></div></div>
-      <div class="cockpit" style="grid-template-columns:repeat(2,1fr);margin-bottom:14px">
-        <div class="kpi2 good"><div class="lbl">Marge encore plaçable à 20 %</div><div class="val num">${eur(avPA.margeTotale)}</div><div class="sub">avant de taper le palier 31,25 % (total toutes jambes assuré→enfant)</div></div>
-        <div class="kpi2"><div class="lbl">Capital 990 I déjà destiné aux enfants</div><div class="val num">${eur(avPA.totalCouvert)}</div><div class="sub">droits estimés ${eur(avPA.totalDroits)}</div></div>
-      </div>
+      <div class="section-head"><div><h2>🛡️ Assurance-vie — combien reçoit chaque enfant & la marge</h2><div class="small muted">Scénario « rien n'est consommé » : <b>TOUTE</b> ton AV avant 70 ans (990 I) finit chez les 3 enfants (clause « conjoint à défaut » et contrats sans clause compris). Plafond <b>852 500 €</b> (abatt. 152 500 € + 700 000 € à 20 %) <b>par assuré → enfant</b> ; au-delà 31,25 %.</div></div></div>
+      <div class="benef-cards" style="margin-bottom:10px">${avPA.parEnfant.map((e) => {
+        const full = e.capaciteAvant3125 <= 0;
+        return `<div class="benef-card">
+          <div class="nom">${e.enfant}</div>
+          <div class="cap-recu num">${eur(e.capital)}</div>
+          <div class="kv"><span class="k">Reçu en AV (avant 70)</span><span class="v num">${eur(e.capital)}</span></div>
+          <div class="kv"><span class="k">Droits 990 I estimés</span><span class="v num ${e.droits > 0 ? "neg" : "pos"}">${eur(e.droits)}</span></div>
+          <div class="kv total"><span class="k">${full ? "⚠️ Plafond 20 % atteint" : "💰 Peut encore recevoir à 20 %"}</span><span class="v num ${full ? "neg" : "pos"}">${full ? "FULL" : eur(e.capaciteAvant3125)}</span></div>
+        </div>`;
+      }).join("")}</div>
+      ${capes
+        ? `<div class="small" style="margin:0 0 10px"><span class="badge warn">Plafond 20 % dépassé</span> une part bascule à <b>31,25 %</b> — réoriente les prochains versements.</div>`
+        : `<div class="optim-verdict" style="margin:0 0 10px">✅ <b>Aucun enfant ne dépasse le plafond des 20 %</b> — toute ton AV (${eur(avPA.totalCouvert)}) est à <b>20 % ou en franchise</b>, rien au palier 31,25 %.</div>`}
+      <details><summary class="muted small" style="cursor:pointer;margin-bottom:6px">Détail par assuré → enfant (le plafond s'ouvre par parent)</summary>
       <div class="table-wrap"><table class="grid2">
-        <thead><tr><th>Assuré (au décès)</th><th>Enfant</th><th>Capital 990 I</th><th>Palier</th><th>Reste avant 31,25 %</th><th>Droits</th></tr></thead>
+        <thead><tr><th>Assuré</th><th>Enfant</th><th>Capital 990 I</th><th>Palier</th><th>Reste avant 31,25 %</th><th>Droits</th></tr></thead>
         <tbody>${avPA.rows.map((r) => `<tr>
-          <td>${r.assure}</td><td><b>${r.enfant}</b>${r.differe ? ' <span class="badge neutral" title="Clause conjoint à défaut : reçu au 2ᵈ décès">2ᵈ décès</span>' : ""}${r.suppose ? ' <span class="badge warn" title="Contrat sans clause : supposé réparti entre les enfants">supposé</span>' : ""}</td>
+          <td>${r.assure}</td><td><b>${r.enfant}</b>${r.differe ? ' <span class="badge neutral" title="Reçu au 2ᵈ décès">2ᵈ décès</span>' : ""}${r.suppose ? ' <span class="badge warn" title="Sans clause : supposé enfants">supposé</span>' : ""}</td>
           <td class="num">${eur(r.capital)}</td>
           <td>${palTag(r.palier)}</td>
-          <td class="num ${r.capaciteAvant3125 > 0 ? "pos" : "neg"}">${r.capaciteAvant3125 > 0 ? eur(r.capaciteAvant3125) : "0 € ⚠️ capé"}</td>
+          <td class="num ${r.capaciteAvant3125 > 0 ? "pos" : "neg"}">${r.capaciteAvant3125 > 0 ? eur(r.capaciteAvant3125) : "0 € ⚠️"}</td>
           <td class="num droits">${eur(r.droits)}</td>
         </tr>`).join("")}</tbody>
-      </table></div>
+      </table></div></details>
       <div class="fiche" style="margin-top:12px">
-        <div class="row"><span class="k">💡 Marge encore plaçable à 20 %, par parent-assuré</span><span class="v"></span></div>
-        ${avPA.margeParAssure.map((m) => `<div class="row sub"><span class="k">${m.assure} — déjà destiné ${eur(m.capital)}</span><span class="v num pos">reste ${eur(m.marge)}</span></div>`).join("")}
+        <div class="row"><span class="k">Total de tes contrats d'assurance-vie</span><span class="v num">${eur(avPA.totalAvGlobal)}</span></div>
+        <div class="row sub"><span class="k">✅ avant 70 ans (990 I), supposé chez les enfants</span><span class="v num">${eur(avPA.totalCouvert)}</span></div>
+        ${avPA.supposeEnfants > 0 ? `<div class="row sub"><span class="k">↳ dont ${eur(avPA.supposeEnfants)} <span class="badge warn">supposé</span> (contrats sans clause dans l'app)</span><span class="v"></span></div>` : ""}
+        ${avPA.apres70 > 0 ? `<div class="row sub"><span class="k">↪ après 70 ans (757 B — autre régime)</span><span class="v num">${eur(avPA.apres70)}</span></div>` : ""}
+        ${avPA.versAutres > 0 ? `<div class="row sub"><span class="k">↪ part vers conjoint / autres</span><span class="v num">${eur(avPA.versAutres)}</span></div>` : ""}
       </div>
-      ${nbDiffere > 0 ? `<p class="small muted" style="margin-top:8px">ℹ️ Les lignes <span class="badge neutral">2ᵈ décès</span> viennent de contrats en clause « conjoint à défaut » : les enfants les touchent seulement au décès du <b>second</b> parent. Ils comptent dans ta marge car ils finiront bien chez eux.</p>` : ""}
-      ${capes.length
-        ? `<div class="small" style="margin-top:10px"><span class="badge warn">Plafond 20 % dépassé</span> ${capes.map((r) => `<b>${r.enfant}</b> (via ${r.assure})`).join(", ")} bascule(nt) à <b>31,25 %</b> — chaque euro d'AV supplémentaire de cet assuré vers cet enfant est taxé à 31,25 %. Réoriente vers un enfant/assuré au plafond libre.</div>`
-        : `<div class="small muted" style="margin-top:10px">✅ Aucune jambe assuré→enfant ne dépasse le plafond des 20 % — tout ton capital 990 I reste dans la tranche à 20 %.</div>`}
-      <div class="fiche" style="margin-top:12px">
-        <div class="row"><span class="k">Total de tes contrats d'assurance-vie (saisis)</span><span class="v num">${eur(avPA.totalAvGlobal)}</span></div>
-        <div class="row sub"><span class="k">✅ couvert ici : avant 70 ans (990 I), vers les enfants</span><span class="v num">${eur(avPA.totalCouvert)}</span></div>
-        ${avPA.apres70 > 0 ? `<div class="row sub"><span class="k">↪ après 70 ans (757 B, autre régime — non affiché ici)</span><span class="v num">${eur(avPA.apres70)}</span></div>` : ""}
-        ${avPA.versAutres > 0 ? `<div class="row sub"><span class="k">↪ part vers le conjoint / autres bénéficiaires</span><span class="v num">${eur(avPA.versAutres)}</span></div>` : ""}
-        ${avPA.sansBeneficiaire > 0 ? `<div class="row sub"><span class="k">⚠️ contrats sans bénéficiaire renseigné</span><span class="v num" style="color:var(--warn)">${eur(avPA.sansBeneficiaire)}</span></div>` : ""}
-      </div>
-      <p class="small muted" style="margin-top:8px">ℹ️ Cette vue <b>par assuré</b> est la plus juste fiscalement (chaque parent = abattement + tranche 20 % distincts). Le « Total droits AV » de la synthèse, lui, agrège par bénéficiaire — estimation <b>prudente</b> (souvent plus élevée) quand deux parents assurent le même enfant.</p>
+      ${avPA.supposeEnfants > 0 ? `<p class="small muted" style="margin-top:8px">💡 ${eur(avPA.supposeEnfants)} sans clause dans l'app → supposés répartis entre tes 3 enfants. Renseigne leur clause (onglet 🛡️ Assurance-vie) pour figer le calcul.</p>` : ""}
     </div>`;
   }
 
@@ -2036,20 +2037,19 @@ function renderOptimiseur() {
     <div class="card">
       <h2>🛡️ Assurance-vie — combien chaque enfant reçoit & la marge <span class="muted small">abatt. 152 500 € · 20 % → 700 000 € · 31,25 % au-delà</span></h2>
       <p class="muted small">Scénario <b>« rien n'est consommé »</b> : on suppose que le conjoint ne dépense rien et que <b>TOUTE</b> ton assurance-vie avant 70 ans finit chez les 3 enfants (clause « conjoint à défaut » et contrats sans clause compris). Le plafond 852 500 € s'apprécie <b>par assuré → enfant</b> (chaque parent ouvre le sien).</p>
-      <div class="benef-cards" style="margin-bottom:6px">${avPAo.parEnfant.map((e) => {
+      <div class="benef-cards" style="margin-bottom:10px">${avPAo.parEnfant.map((e) => {
         const full = e.capaciteAvant3125 <= 0;
         return `<div class="benef-card">
           <div class="nom">${e.enfant}</div>
           <div class="cap-recu num">${eur2(e.capital)}</div>
           <div class="kv"><span class="k">Reçu en AV (avant 70)</span><span class="v num">${eur2(e.capital)}</span></div>
           <div class="kv"><span class="k">Droits 990 I estimés</span><span class="v num ${e.droits > 0 ? "neg" : "pos"}">${eur2(e.droits)}</span></div>
-          <div class="kv total"><span class="k">${full ? "⚠️ Plafond 20 % atteint" : "Peut encore recevoir à 20 %"}</span><span class="v num ${full ? "neg" : "pos"}">${full ? "FULL" : eur2(e.capaciteAvant3125)}</span></div>
+          <div class="kv total"><span class="k">${full ? "⚠️ Plafond 20 % atteint" : "💰 Peut encore recevoir à 20 %"}</span><span class="v num ${full ? "neg" : "pos"}">${full ? "FULL" : eur2(e.capaciteAvant3125)}</span></div>
         </div>`;
       }).join("")}</div>
-      <div class="cockpit" style="grid-template-columns:repeat(2,1fr);margin:12px 0 14px">
-        <div class="kpi2 good"><div class="lbl">Marge totale encore plaçable à 20 %</div><div class="val num">${eur2(avPAo.margeTotale)}</div><div class="sub">avant de taper le palier 31,25 %</div></div>
-        <div class="kpi2"><div class="lbl">Total AV destiné aux enfants</div><div class="val num">${eur2(avPAo.totalCouvert)}</div><div class="sub">droits estimés ${eur2(avPAo.totalDroits)}</div></div>
-      </div>
+      ${avPAo.rows.some((r) => r.palier === "31.25")
+        ? `<div class="optim-verdict" style="margin:0 0 12px;border-left-color:var(--warn)">⚠️ <b>Une ou plusieurs jambes dépassent le palier des 20 %</b> — la part au-delà de 852 500 € (par assuré → enfant) est taxée à <b>31,25 %</b>. Mieux vaut réorienter les prochains versements. Droits 990 I estimés : <b>${eur2(avPAo.totalDroits)}</b>.</div>`
+        : `<div class="optim-verdict" style="margin:0 0 12px">✅ <b>Aucun enfant ne dépasse le plafond des 20 %</b> — toute ton AV avant 70 ans (${eur2(avPAo.totalCouvert)}) est taxée à <b>20 % ou en franchise</b>, rien au palier 31,25 %. Chaque enfant peut encore recevoir la somme ci-dessus à 20 % (cumul des plafonds de ses 2 parents-assurés). Droits 990 I estimés : <b>${eur2(avPAo.totalDroits)}</b>.</div>`}
       <details><summary class="muted small" style="cursor:pointer;margin-bottom:6px">Détail par assuré → enfant (le plafond s'ouvre par parent)</summary>
       <div class="table-wrap"><table class="grid2">
         <thead><tr><th>Assuré (au décès)</th><th>Enfant</th><th>Capital 990 I</th><th>Palier</th><th>Reste avant 31,25 %</th><th>Droits</th></tr></thead>
