@@ -3,11 +3,11 @@
 //  Consomme debrief(state) + barèmes data.js. Zéro DOM.
 //  Tout est INDICATIF, à valider avec un notaire.
 // =============================================================
-import { debrief, avAvant70Effectif } from "./graph.js?v=79";
+import { debrief, avAvant70Effectif } from "./graph.js?v=80";
 import {
   ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70,
   BAREME_LIGNE_DIRECTE, calculDroits, tauxUsufruit,
-} from "./data.js?v=79";
+} from "./data.js?v=80";
 
 const PLAFOND_AV = AV_AVANT_70.abattement; // 152 500 € / bénéficiaire (990 I)
 
@@ -104,6 +104,7 @@ export function avParAssureEnfant(state) {
   // Réconciliation avec le TOTAL des contrats saisis (pour ne rien masquer)
   let totalAvGlobal = 0, apres70 = 0, versAutres = 0, sansBeneficiaire = 0;
   const tousEnfants = enfants.map((e) => e.id);
+  const legInfo = {}; // "assuré|enfantId" -> { differe: bool } (differe = reçu au 2d décès)
   av.forEach((a) => {
     const m = Number(a.montant) || 0;
     totalAvGlobal += m;
@@ -111,11 +112,12 @@ export function avParAssureEnfant(state) {
     if (!avAvant70Effectif(a, personnes)) { apres70 += m; return; } // après 70 ans (757 B) : autre régime
     // Bénéficiaires FINAUX côté enfants :
     //  - clause « conjoint à défaut enfants » : le conjoint reçoit exonéré au 1er décès,
-    //    puis les enfants « à défaut » au 2d → destination finale = enfants. Liste à défaut
-    //    vide → on suppose TOUS les enfants (parts égales).
+    //    puis les enfants « à défaut » au 2d → destination finale = enfants (reçu PLUS TARD).
+    //    Liste à défaut vide → on suppose TOUS les enfants (parts égales).
     //  - clause désignée : liste telle quelle (enfants + éventuels autres).
+    const differe = a.clauseType === "conjoint_defaut_enfants"; // reçu au 2d décès
     let bensAll = a.beneficiaires || [];
-    if (a.clauseType === "conjoint_defaut_enfants") {
+    if (differe) {
       const kids = bensAll.filter(estEnfant);
       bensAll = kids.length ? kids : tousEnfants;
     }
@@ -127,8 +129,11 @@ export function avParAssureEnfant(state) {
     // le reste (conjoint/autres) est comptabilisé à part.
     bensAll.forEach((b) => {
       const share = tot > 0 ? (Number(rep[b]) || 0) / tot : 1 / bensAll.length;
-      if (estEnfant(b)) legs[`${assure}|${b}`] = (legs[`${assure}|${b}`] || 0) + m * share;
-      else versAutres += m * share;
+      if (estEnfant(b)) {
+        const key = `${assure}|${b}`;
+        legs[key] = (legs[key] || 0) + m * share;
+        (legInfo[key] ||= { differe: false }).differe = legInfo[key].differe || differe;
+      } else versAutres += m * share;
     });
   });
   const seuil3125 = PLAFOND_AV + AV_AVANT_70.seuilTranche1;
@@ -137,6 +142,7 @@ export function avParAssureEnfant(state) {
     const palier = capital <= PLAFOND_AV ? "franchise" : capital <= seuil3125 ? "20" : "31.25";
     return {
       assure, enfant: nom(benId), capital, palier,
+      differe: !!(legInfo[k] && legInfo[k].differe),
       capaciteAvant3125: Math.max(0, seuil3125 - capital),
       droits: droits990(capital),
     };
@@ -152,7 +158,18 @@ export function avParAssureEnfant(state) {
     parEnfantMap[r.enfant].capaciteAvant3125 += r.capaciteAvant3125;
   });
   const parEnfant = Object.values(parEnfantMap).sort((a, b) => b.capital - a.capital);
-  return { rows, parEnfant, seuil3125, plafond: PLAFOND_AV, totalAvGlobal, totalCouvert, apres70, versAutres, sansBeneficiaire };
+  // Marge de manœuvre : combien peut-on ENCORE verser à 20 % (avant le palier 31,25 %),
+  // agrégée par PARENT-ASSURÉ (le plafond s'ouvre par assuré, pas au niveau de l'enfant).
+  const margeParAssureMap = {};
+  rows.forEach((r) => {
+    (margeParAssureMap[r.assure] ||= { assure: r.assure, capital: 0, marge: 0 });
+    margeParAssureMap[r.assure].capital += r.capital;
+    margeParAssureMap[r.assure].marge += r.capaciteAvant3125;
+  });
+  const margeParAssure = Object.values(margeParAssureMap).sort((a, b) => b.marge - a.marge);
+  const margeTotale = rows.reduce((s, r) => s + r.capaciteAvant3125, 0);
+  const totalDroits = rows.reduce((s, r) => s + r.droits, 0);
+  return { rows, parEnfant, seuil3125, plafond: PLAFOND_AV, totalAvGlobal, totalCouvert, apres70, versAutres, sansBeneficiaire, margeParAssure, margeTotale, totalDroits };
 }
 
 // Comparateur fiscal d'un CONTRAT DE CAPITALISATION : donation NP démembrée (A)
@@ -253,12 +270,15 @@ export function arbitrageDemembrement(actif, p) {
   const risqueDeces = p.esperance != null && ageWait > p.esperance;
 
   // NE RIEN FAIRE — succession à l'espérance de vie : PLEINE valeur nette revalorisée
-  // (dette quasi soldée), taxée en pleine propriété.
+  // (dette quasi soldée), taxée en pleine propriété. L'abattement retenu est celui
+  // DISPONIBLE À LA DATE DU DÉCÈS (abattParEnfantSucc, connecté au délai de recharge) :
+  // plein si le décès survient après la recharge, partiel s'il survient avant.
   const anneesDeces = Math.max(0, (p.esperance || p.ageParent) - p.ageParent);
+  const abattSucc = p.abattParEnfantSucc != null ? p.abattParEnfantSucc : abattFrais;
   const nD = netA(anneesDeces);
   const valeurDeces = nD.net * frac;
   const baseDeces = valeurDeces * dutreilFactor;
-  const droitsDeces = droitsLD(baseDeces, abattFrais, nEnf);
+  const droitsDeces = droitsLD(baseDeces, abattSucc, nEnf);
 
   const scores = { maintenant: droitsNow, attendre: droitsWait, succession: droitsDeces };
   const best = Object.keys(scores).reduce((a, b) => (scores[a] <= scores[b] ? a : b));
@@ -271,7 +291,7 @@ export function arbitrageDemembrement(actif, p) {
     frac, horizon,
     maintenant: { valeurOfferte: offerteNow, npFrac: npNow, base: baseNow, droits: droitsNow, net: offerteNow - droitsNow, abatt: abattNow, age: p.ageParent, valeurNette: n0.net, dette: n0.dette },
     attendre: { valeurOfferte: offerteFut, npFrac: npFut, base: baseFut, droits: droitsWait, net: offerteFut - droitsWait, valeurNette: nW.net, valeurBrute: nW.brut, dette: nW.dette, risqueDeces, abatt: abattWait, age: ageWait, horizon },
-    succession: { valeur: valeurDeces, base: baseDeces, droits: droitsDeces, net: valeurDeces - droitsDeces, abatt: abattFrais, valeurNette: nD.net, dette: nD.dette },
+    succession: { valeur: valeurDeces, base: baseDeces, droits: droitsDeces, net: valeurDeces - droitsDeces, abatt: abattSucc, valeurNette: nD.net, dette: nD.dette, anneesDeces },
     best,
     deltaAttendreVsMaintenant: droitsWait - droitsNow,
     deltaMaintenantVsSuccession: droitsDeces - droitsNow,

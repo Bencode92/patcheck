@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=79";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=79";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=79";
-import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation } from "./optim.js?v=79";
-import * as sync from "./sync.js?v=79";
-import { askAI } from "./ai.js?v=79";
+} from "./data.js?v=80";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=80";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=80";
+import { optimiserAV, arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation } from "./optim.js?v=80";
+import * as sync from "./sync.js?v=80";
+import { askAI } from "./ai.js?v=80";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -754,18 +754,28 @@ async function renderOrganigramme() {
   if (avPA.rows.length) {
     const palTag = (p) => p === "franchise" ? '<span class="badge ok">0 %</span>' : p === "20" ? '<span class="badge" style="background:#fdf3e4;color:#96570a;border-color:#f3ddba">20 %</span>' : '<span class="badge" style="background:#ffe0dd;color:#b42318;border-color:#f3b8b0">31,25 %</span>';
     const capes = avPA.rows.filter((r) => r.palier === "31.25");
+    const nbDiffere = avPA.rows.filter((r) => r.differe).length;
     avAssureCard = `<div class="card">
-      <div class="section-head"><div><h2>🛡️ Après décès — plafonds 990 I par assuré → enfant</h2><div class="small muted">Destination finale du capital (clause « conjoint à défaut enfants » incluse : reçu par les enfants au 2ᵈ décès). Le plafond <b>852 500 €</b> (abattement 152 500 € + 700 000 € à 20 %) s'apprécie <b>par assuré → enfant</b>, à chaque décès — <b>chaque parent ouvre son propre plafond</b> sur chaque enfant. ⚠️ Ces plafonds ne se cumulent PAS au niveau de l'enfant : la « place à 20 % » se lit ligne par ligne ci-dessous. Au-delà : 31,25 %.</div></div></div>
+      <div class="section-head"><div><h2>🛡️ Assurance-vie — ta marge avant le palier 31,25 %</h2><div class="small muted">Tous tes contrats <b>avant 70 ans</b> (990 I), à leur <b>destination finale chez les enfants</b> — clause « conjoint à défaut enfants » incluse : ils passent d'abord par le conjoint au 1ᵉʳ décès (exonéré) puis reviennent aux enfants <b>au 2ᵈ décès</b>. Le plafond <b>852 500 €</b> (abattement 152 500 € + 700 000 € à 20 %) s'apprécie <b>par assuré → enfant</b> — chaque parent ouvre son propre plafond, ils ne se cumulent PAS au niveau de l'enfant. Au-delà : 31,25 %.</div></div></div>
+      <div class="cockpit" style="grid-template-columns:repeat(2,1fr);margin-bottom:14px">
+        <div class="kpi2 good"><div class="lbl">Marge encore plaçable à 20 %</div><div class="val num">${eur(avPA.margeTotale)}</div><div class="sub">avant de taper le palier 31,25 % (total toutes jambes assuré→enfant)</div></div>
+        <div class="kpi2"><div class="lbl">Capital 990 I déjà destiné aux enfants</div><div class="val num">${eur(avPA.totalCouvert)}</div><div class="sub">droits estimés ${eur(avPA.totalDroits)}</div></div>
+      </div>
       <div class="table-wrap"><table class="grid2">
-        <thead><tr><th>Assuré (au décès)</th><th>Enfant</th><th>Capital 990 I reçu</th><th>Palier</th><th>Reste avant 31,25 %</th><th>Droits</th></tr></thead>
+        <thead><tr><th>Assuré (au décès)</th><th>Enfant</th><th>Capital 990 I</th><th>Palier</th><th>Reste avant 31,25 %</th><th>Droits</th></tr></thead>
         <tbody>${avPA.rows.map((r) => `<tr>
-          <td>${r.assure}</td><td><b>${r.enfant}</b></td>
+          <td>${r.assure}</td><td><b>${r.enfant}</b>${r.differe ? ' <span class="badge neutral" title="Clause conjoint à défaut : reçu au 2ᵈ décès">2ᵈ décès</span>' : ""}</td>
           <td class="num">${eur(r.capital)}</td>
           <td>${palTag(r.palier)}</td>
           <td class="num ${r.capaciteAvant3125 > 0 ? "pos" : "neg"}">${r.capaciteAvant3125 > 0 ? eur(r.capaciteAvant3125) : "0 € ⚠️ capé"}</td>
           <td class="num droits">${eur(r.droits)}</td>
         </tr>`).join("")}</tbody>
       </table></div>
+      <div class="fiche" style="margin-top:12px">
+        <div class="row"><span class="k">💡 Marge encore plaçable à 20 %, par parent-assuré</span><span class="v"></span></div>
+        ${avPA.margeParAssure.map((m) => `<div class="row sub"><span class="k">${m.assure} — déjà destiné ${eur(m.capital)}</span><span class="v num pos">reste ${eur(m.marge)}</span></div>`).join("")}
+      </div>
+      ${nbDiffere > 0 ? `<p class="small muted" style="margin-top:8px">ℹ️ Les lignes <span class="badge neutral">2ᵈ décès</span> viennent de contrats en clause « conjoint à défaut » : les enfants les touchent seulement au décès du <b>second</b> parent. Ils comptent dans ta marge car ils finiront bien chez eux.</p>` : ""}
       ${capes.length
         ? `<div class="small" style="margin-top:10px"><span class="badge warn">Plafond 20 % dépassé</span> ${capes.map((r) => `<b>${r.enfant}</b> (via ${r.assure})`).join(", ")} bascule(nt) à <b>31,25 %</b> — chaque euro d'AV supplémentaire de cet assuré vers cet enfant est taxé à 31,25 %. Réoriente vers un enfant/assuré au plafond libre.</div>`
         : `<div class="small muted" style="margin-top:10px">✅ Aucune jambe assuré→enfant ne dépasse le plafond des 20 % — tout ton capital 990 I reste dans la tranche à 20 %.</div>`}
@@ -2174,14 +2184,20 @@ function renderOptimiseur() {
     const run = () => {
       const bien = biens.find((b) => b.id === $("#o_bien").value) || biens[0];
       const horizonAns = parseNum($("#o_horizon").value);
+      const ageParentIn = parseNum($("#o_age").value);
+      const esperanceIn = parseNum($("#o_esp").value);
       // Abattement disponible à l'horizon = calcul cumulé automatique (dons purgés à cette date future)
       const abattParEnfantWait = abattementMoyenADate(state, horizonAns);
+      // Voie succession : abattement à la DATE DU DÉCÈS (espérance), connecté au même délai
+      // de recharge que les autres voies — plein si le décès est après la recharge, partiel sinon.
+      const anneesDecesIn = Math.max(0, esperanceIn - ageParentIn);
+      const abattParEnfantSucc = abattementMoyenADate(state, anneesDecesIn);
       const r = arbitrageDemembrement(bien, {
         revaloPct: parseNum($("#o_revalo").value),
-        esperance: parseNum($("#o_esp").value),
-        ageParent: parseNum($("#o_age").value),
+        esperance: esperanceIn,
+        ageParent: ageParentIn,
         dureePretAns: parseNum($("#o_pret").value),
-        nbParents, nbEnfants, abattParEnfantNow, abattParEnfantWait, horizonAns,
+        nbParents, nbEnfants, abattParEnfantNow, abattParEnfantWait, abattParEnfantSucc, horizonAns,
         fractionAOffrir: parseNum($("#o_frac").value) / 100,
       });
       const labelAttendre = horizonAns > 0 ? `Attendre la recharge (${horizonAns} an${horizonAns > 1 ? "s" : ""})` : "Attendre (abattement déjà libre)";
