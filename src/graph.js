@@ -1,7 +1,7 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=86";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=87";
 
 // Année de naissance : la DATE complète prime (plus précise), puis année seule, puis âge
 function birthYear(p) {
@@ -490,6 +490,7 @@ export function actifsTransmissiblesParents(state) {
     if (d.droit !== "PP" || !parentIds.has(d.proprietaire)) return;
     const a = actifById(d.actifRef);
     if (!a || !CATS.has(a.categorie)) return;
+    if (a.aGarder) return; // « À garder par le propriétaire » → exclu des scénarios de donation/démembrement
     parActif[a.id] = (parActif[a.id] || 0) + partNum(d.part);
   });
   return Object.entries(parActif).map(([id, partPct]) => {

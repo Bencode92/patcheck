@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=86";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=86";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=86";
-import { arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation } from "./optim.js?v=86";
-import * as sync from "./sync.js?v=86";
-import { askAI } from "./ai.js?v=86";
+} from "./data.js?v=87";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=87";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=87";
+import { arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation } from "./optim.js?v=87";
+import * as sync from "./sync.js?v=87";
+import { askAI } from "./ai.js?v=87";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1079,6 +1079,7 @@ function renderPatrimoine() {
         ${CAT_A_BANQUE.has(a.categorie) ? `<input class="f_etab" data-ai="${ai}" list="etabs" placeholder="Banque / Courtier" value="${a.etablissement || ""}" style="max-width:160px">` : ""}
         <input class="f_an" data-ai="${ai}" type="number" min="1900" max="${yr}" placeholder="Année acquis." value="${a.annee ?? ""}" style="max-width:120px">
         ${a.categorie === "entreprise" ? `<label class="benef-chk"><input type="checkbox" class="f_dut" data-ai="${ai}" ${a.dutreil ? "checked" : ""}> Dutreil −75%</label>` : ""}
+        <button class="garde-btn ${a.aGarder ? "on" : ""}" data-garde="${ai}" title="À garder impérativement par le propriétaire — exclu des scénarios de donation/démembrement">${a.aGarder ? "🔒 À garder" : "🔓 Transmissible"}</button>
         <button class="verif-btn ${a.verifie ? "on" : ""}" data-verif="${ai}" title="Marquer comme vérifié">${a.verifie ? "✓ OK" : "OK"}</button>
         <button class="danger-link" data-del="actif" data-ai="${ai}" title="Supprimer ce bien">🗑</button>
       </div>
@@ -1164,6 +1165,8 @@ function renderPatrimoine() {
     if (e.target.closest("#expand_all")) { collapsedCats.clear(); renderPatrimoine(); return; }
     const verif = e.target.closest("[data-verif]");
     if (verif) { const a = A[+verif.dataset.verif]; a.verifie = !a.verifie; save(); renderPatrimoine(); return; }
+    const garde = e.target.closest("[data-garde]");
+    if (garde) { const a = A[+garde.dataset.garde]; a.aGarder = !a.aGarder; save(); renderPatrimoine(); return; }
 
     const add = e.target.closest("[data-add]");
     if (add) {
