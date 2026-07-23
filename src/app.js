@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=84";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=84";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=84";
-import { arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation } from "./optim.js?v=84";
-import * as sync from "./sync.js?v=84";
-import { askAI } from "./ai.js?v=84";
+} from "./data.js?v=85";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=85";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=85";
+import { arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation } from "./optim.js?v=85";
+import * as sync from "./sync.js?v=85";
+import { askAI } from "./ai.js?v=85";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2102,7 +2102,7 @@ function renderOptimiseur() {
         <label>Bien
           <select id="o_bien">${biens.map((b, i) => `<option value="${b.id}" data-dette="${Math.round(b.dette)}" ${i === 0 ? "selected" : ""}>${b.libelle} — net ${eur2(b.valeurNette)}${b.dette > 0 ? ` (dette ${eur2(b.dette)})` : ""}${b.dutreil ? " · Dutreil" : ""}</option>`).join("")}</select>
         </label>
-        <label>Fraction à donner (%)<input type="number" id="o_frac" value="10" min="1" max="100" step="5"></label>
+        <label>Part du bien à donner en NP (%)<input type="number" id="o_frac" value="10" min="1" max="100" step="5"><span class="muted small" style="display:block;margin-top:2px">% des parts, pas la fraction 669</span></label>
         <label>Délai recharge abatt. (auto, ans)<input type="number" id="o_horizon" value="${horizonDefaut}" min="0" max="30"></label>
       </div>
       <div class="form-row">
@@ -2221,7 +2221,15 @@ function renderOptimiseur() {
       const nomVoie = { maintenant: "Donner la NP maintenant", attendre: labelAttendre, succession: "Ne rien faire (succession)" };
       const bestDroits = r.best === "maintenant" ? r.maintenant.droits : r.best === "attendre" ? r.attendre.droits : r.succession.droits;
       const eco = (voie, x) => r.best === voie ? '<span class="badge ok">le moins coûteux</span>' : `<span class="muted small">+${eur2(x - bestDroits)}</span>`;
+      const fracPct = parseNum($("#o_frac").value);
       $("#o_result").innerHTML = `
+        <div class="optim-verdict" style="margin-top:12px;border-left-color:var(--accent-2)">
+          <b>📐 Ce que tu donnes réellement</b> (voie « maintenant ») :
+          <div class="line"><span>Tu donnes <b>${fracPct} %</b> des parts du bien (net ${eur2(r.maintenant.valeurNette)})</span><b>${eur2(r.maintenant.valeurOfferte)}</b></div>
+          <div class="line"><span>× fraction nue-propriété (barème 669, ${pct(r.maintenant.npFrac)} à ${r.maintenant.age} ans)</span><b>× ${pct(r.maintenant.npFrac)}</b></div>
+          <div class="line total"><span>= assiette taxable aux droits de donation</span><b>${eur2(r.maintenant.base)}</b></div>
+          <p class="muted small" style="margin-top:6px">Les <b>${fracPct} %</b> = part du <b>bien</b> transmise. La décote nue-propriété (669) s'applique <b>en plus</b>, automatiquement selon ton âge. L'usufruit (${pct(1 - r.maintenant.npFrac)}) te reste — revenus + contrôle.</p>
+        </div>
         <div class="table-wrap" style="margin-top:12px"><table class="grid2">
           <thead><tr><th>Voie</th><th>Base taxable</th><th>Abatt./enfant</th><th>Droits estimés</th><th>Fraction NP</th><th></th></tr></thead>
           <tbody>
