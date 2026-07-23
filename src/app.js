@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=85";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=85";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=85";
-import { arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation } from "./optim.js?v=85";
-import * as sync from "./sync.js?v=85";
-import { askAI } from "./ai.js?v=85";
+} from "./data.js?v=86";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=86";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=86";
+import { arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation } from "./optim.js?v=86";
+import * as sync from "./sync.js?v=86";
+import { askAI } from "./ai.js?v=86";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2234,14 +2234,18 @@ function renderOptimiseur() {
           <thead><tr><th>Voie</th><th>Base taxable</th><th>Abatt./enfant</th><th>Droits estimés</th><th>Fraction NP</th><th></th></tr></thead>
           <tbody>
             <tr><td><b>${nomVoie.maintenant}</b><br><span class="muted small">Parent ${r.maintenant.age} ans · garde l'usufruit et le contrôle${bien.dutreil ? " · Dutreil −75 %" : ""}</span></td><td class="num">${eur2(r.maintenant.base)}</td><td class="num">${eur2(r.maintenant.abatt)}</td><td class="num droits">${eur2(r.maintenant.droits)}</td><td class="num">${pct(r.maintenant.npFrac)}</td><td>${eco("maintenant", r.maintenant.droits)}</td></tr>
-            <tr><td><b>${nomVoie.attendre}</b><br><span class="muted small">Parent ${r.attendre.age} ans · net ${eur2(r.attendre.valeurNette)}${r.attendre.dette > 0 ? ` (dette résiduelle ${eur2(r.attendre.dette)})` : " (prêt soldé)"} · abattement rechargé${r.attendre.risqueDeces ? ' · <span style="color:var(--warn)">⚠️ au-delà de l\'espérance de vie</span>' : ""}</span></td><td class="num">${eur2(r.attendre.base)}</td><td class="num">${eur2(r.attendre.abatt)}</td><td class="num droits">${eur2(r.attendre.droits)}</td><td class="num">${pct(r.attendre.npFrac)}</td><td>${eco("attendre", r.attendre.droits)}</td></tr>
+            <tr><td><b>${nomVoie.attendre}</b><br><span class="muted small">Parent ${r.attendre.age} ans · net ${eur2(r.attendre.valeurNette)}${r.attendre.dette > 0 ? ` (dette résiduelle ${eur2(r.attendre.dette)})` : " (prêt soldé)"} · ${r.attendre.abatt > 0 ? `abattement ${eur2(r.attendre.abatt)}/enfant` : `<span style="color:var(--warn)">⚠️ abattement pas encore rechargé à ${horizonAns} an(s)</span>`}${r.attendre.risqueDeces ? ' · <span style="color:var(--warn)">⚠️ au-delà de l\'espérance de vie</span>' : ""}</span></td><td class="num">${eur2(r.attendre.base)}</td><td class="num">${eur2(r.attendre.abatt)}</td><td class="num droits">${eur2(r.attendre.droits)}</td><td class="num">${pct(r.attendre.npFrac)}</td><td>${eco("attendre", r.attendre.droits)}</td></tr>
             <tr><td><b>${nomVoie.succession}</b><br><span class="muted small">Pleine propriété transmise au décès${bien.dutreil ? " · Dutreil −75 %" : ""}</span></td><td class="num">${eur2(r.succession.base)}</td><td class="num">${eur2(r.succession.abatt)}</td><td class="num droits">${eur2(r.succession.droits)}</td><td class="num">100 %</td><td>${eco("succession", r.succession.droits)}</td></tr>
           </tbody>
         </table></div>
         <div class="optim-verdict" style="margin-top:10px">
           <b>Verdict :</b> la voie <b>« ${nomVoie[r.best]} »</b> minimise les droits.
           ${r.deltaMaintenantVsSuccession > 0 ? `Donner la NP maintenant économise <b style="color:var(--accent-2)">${eur2(r.deltaMaintenantVsSuccession)}</b> vs ne rien faire.` : ""}
-          ${horizonAns > 0 ? ` Attendre ${horizonAns} an(s) recharge l'abattement mais fait grossir la nue-propriété taxable (parent plus âgé) et la valeur du bien — le tableau tranche selon TES chiffres.` : " Ton abattement est déjà disponible : rien à gagner à attendre côté abattement."}
+          ${horizonAns > 0
+            ? (r.attendre.abatt > 0
+                ? ` Attendre ${horizonAns} an(s) recharge l'abattement (${eur2(r.attendre.abatt)}/enfant) mais fait grossir la nue-propriété taxable (parent plus âgé) et la valeur du bien — le tableau tranche selon TES chiffres.`
+                : ` ⚠️ À ${horizonAns} an(s), tes donations ne sont <b>pas encore purgées</b> (recharge complète dans ~${horizonRechargePleine(state)} an(s)) : l'abattement reste à 0 ET la nue-propriété grossit → attendre est le pire choix ici. Donner maintenant, ou attendre AU MOINS la recharge complète.`)
+            : " Ton abattement est déjà disponible : rien à gagner à attendre côté abattement."}
           ${r.frac < 1 ? ` Avec une fraction de ${pct(r.frac)}, il faudrait ~<b>${r.tranches.ops}</b> opération(s) espacées de 15 ans pour transmettre tout le bien en purgeant les abattements.` : ""}
         </div>
         <p class="muted small" style="margin-top:6px">💡 Le démembrement ne taxe que la nue-propriété (fraction 669) et gèle la valeur transmise : la revalorisation future échappe aux droits. Le parent conserve les revenus et le contrôle via l'usufruit. À valider avec un notaire.</p>`;
