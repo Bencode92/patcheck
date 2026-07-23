@@ -497,12 +497,14 @@ button.chip:hover { border-color: var(--accent); color: var(--accent); }
 .verif-btn:hover { border-color: var(--accent-2); color: var(--accent-2); }
 .verif-btn.on { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
 .garde-btn {
-  border: 1px solid var(--line-strong); background: var(--panel); color: var(--muted);
   font-size: 12px; font-weight: 650; padding: 3px 10px; border-radius: 999px; cursor: pointer;
   font-family: inherit; transition: all var(--tr); white-space: nowrap;
+  /* état par défaut = Transmissible → VERT */
+  background: #e5f7f0; border: 1px solid #bfe9da; color: #067a56;
 }
-.garde-btn:hover { border-color: var(--warn); color: var(--warn); }
-.garde-btn.on { background: #fdf3e4; border-color: #e0a53a; color: #96570a; }
+.garde-btn:hover { filter: brightness(0.97); }
+/* état actif = À garder → ROUGE */
+.garde-btn.on { background: #ffe0dd; border-color: #f3b8b0; color: #b42318; }
 
 .cat-group { margin-bottom: 14px; }
 .cat-header {
