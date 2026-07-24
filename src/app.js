@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=88";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=88";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=88";
-import { arbitrageDemembrement, timingDonations, syntheseOptim, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation } from "./optim.js?v=88";
-import * as sync from "./sync.js?v=88";
-import { askAI } from "./ai.js?v=88";
+} from "./data.js?v=89";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=89";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=89";
+import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation } from "./optim.js?v=89";
+import * as sync from "./sync.js?v=89";
+import { askAI } from "./ai.js?v=89";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2015,29 +2015,46 @@ function renderOptimiseur() {
   const timing = timingDonations(state);
   const biens = actifsTransmissiblesParents(state);
 
-  // Potentiel « démembrer maintenant » (défaut : revalo 2 %, espérance 90, tout le bien)
-  let potDemem = 0;
+  // --- PLAN D'OPTIMISATION : une action chiffrée par bien transmissible (démembrement
+  // maintenant vs succession), classées par € économisés. Les biens « À garder » (🔒)
+  // sont déjà exclus de `biens`.
+  const planActions = [];
   biens.forEach((b) => {
-    const r = arbitrageDemembrement(b, { revaloPct: 2, esperance: espDefaut, ageParent: b.ageUsufruitierAujourdhui, nbParents, nbEnfants, abattParEnfantNow, fractionAOffrir: 1 });
-    potDemem += Math.max(0, r.succession.droits - r.maintenant.droits);
+    const r = arbitrageDemembrement(b, { revaloPct: 2, esperance: espDefaut, ageParent: b.ageUsufruitierAujourdhui, nbParents, nbEnfants, abattParEnfantNow, abattParEnfantSucc: abattementMoyenADate(state, Math.max(0, espDefaut - b.ageUsufruitierAujourdhui)), fractionAOffrir: 1 });
+    const eco = Math.max(0, r.succession.droits - r.maintenant.droits);
+    if (eco > 0) planActions.push({
+      titre: `Démembrer « ${b.libelle} » maintenant`,
+      detail: `Donner la nue-propriété (garder l'usufruit + contrôle) : <b>${eur2(r.maintenant.droits)}</b> de droits aujourd'hui contre <b>${eur2(r.succession.droits)}</b> à la succession.`,
+      economie: eco,
+    });
   });
+  planActions.sort((a, b) => b.economie - a.economie);
+  const ecoDemem = planActions.reduce((s, a) => s + a.economie, 0);
 
-  const leviers = [...syntheseOptim(state).leviers];
-  if (potDemem > 0) leviers.push({ nom: "Démembrer (donner la nue-propriété) maintenant plutôt qu'à la succession", economie: potDemem });
-  leviers.sort((a, b) => b.economie - a.economie);
-  const economiePotentielle = leviers.reduce((s, l) => s + l.economie, 0);
+  // Leviers complémentaires (marge AV + fenêtres de donation)
+  const avMarge = avParAssureEnfant(state).margeTotale;
+  const capFranchise = d.capaciteExoneree || 0;
 
   // --- Cockpit synthèse
   const cockpit = `
     <div class="card">
-      <h2>🎯 Optimiseur — aide à la décision <span class="muted small">déterministe, chiffré</span></h2>
+      <h2>🎯 Plan d'optimisation — baisser les droits de succession <span class="muted small">sur ton patrimoine transmissible</span></h2>
       <div class="cockpit" style="grid-template-columns:repeat(3,1fr)">
-        <div class="kpi2 alert"><div class="lbl">Droits estimés aujourd'hui</div><div class="val num">${eur2(d.totalDroitsTous)}</div></div>
-        <div class="kpi2 good"><div class="lbl">Économie potentielle identifiée</div><div class="val num">${eur2(economiePotentielle)}</div></div>
-        <div class="kpi2"><div class="lbl">Donnable en franchise (abattements)</div><div class="val num">${eur2(d.capaciteExoneree)}</div></div>
+        <div class="kpi2 alert"><div class="lbl">Droits estimés aujourd'hui</div><div class="val num">${eur2(d.totalDroitsTous)}</div><div class="sub">si rien n'est fait</div></div>
+        <div class="kpi2 good"><div class="lbl">Économie via démembrement</div><div class="val num">${eur2(ecoDemem)}</div><div class="sub">biens transmissibles, donner la NP maintenant</div></div>
+        <div class="kpi2"><div class="lbl">Encore donnable en franchise</div><div class="val num">${eur2(capFranchise)}</div><div class="sub">abattements 100 000 € /15 ans</div></div>
       </div>
-      ${leviers.length ? `<div class="optim-verdict"><b>Leviers classés par gain :</b><ol style="margin:8px 0 0;padding-left:20px">${leviers.map((l) => `<li>${l.nom} — <b style="color:var(--accent-2)">${eur2(l.economie)}</b></li>`).join("")}</ol></div>` : `<p class="muted small">Aucun levier chiffrable détecté sur les données actuelles.</p>`}
-      <p class="muted small" style="margin-top:10px">⚠️ Tous les montants sont <b>indicatifs</b> et reposent sur des hypothèses (revalorisation, âges, ordre des décès). À valider avec un notaire.</p>
+      ${planActions.length
+        ? `<h3 style="margin:14px 0 6px">📋 Ton plan, classé par économie</h3>
+           <div class="reco-list">${planActions.map((a, i) => `<div class="reco reco-action"><span class="reco-ico">${i + 1}</span><span><b>${a.titre}</b> — <b style="color:var(--accent-2)">économise ${eur2(a.economie)}</b><br><span class="muted small">${a.detail}</span></span></div>`).join("")}</div>`
+        : `<p class="muted small" style="margin-top:10px">Aucun bien transmissible à démembrer (tous marqués 🔒 « À garder », ou aucun bien détenu en PP par les parents).</p>`}
+      <div class="fiche" style="margin-top:14px">
+        <div class="row"><span class="k">🛡️ Assurance-vie — marge encore plaçable à 20 %</span><span class="v num pos">${eur2(avMarge)}</span></div>
+        <div class="row sub"><span class="k">Continuer à alimenter l'AV avant 70 ans = transmission hors succession (voir carte AV ci-dessous)</span><span class="v"></span></div>
+        ${capFranchise > 0 ? `<div class="row"><span class="k">🎁 Donations en franchise à ouvrir</span><span class="v num pos">${eur2(capFranchise)}</span></div>` : `<div class="row sub"><span class="k">🎁 Abattements de donation actuellement épuisés — prochaine recharge dans ${horizonRechargePleine(state)} an(s)</span><span class="v"></span></div>`}
+      </div>
+      <div class="optim-verdict" style="margin-top:12px">💡 <b>Ordre logique :</b> ① démembrer en priorité les biens qui rapportent le plus (liste ci-dessus) ② ouvrir les fenêtres de donation dispo ③ continuer à alimenter l'assurance-vie avant 70 ans dans la limite du palier 20 %. Détail de chaque levier dans les cartes ci-dessous.</div>
+      <p class="muted small" style="margin-top:10px">⚠️ Montants <b>indicatifs</b> (hypothèses : revalo 2 %/an, espérance ${espDefaut} ans, tout le bien en NP). Ajuste chaque bien dans la carte Démembrement. À valider avec un notaire.</p>
     </div>`;
 
   // --- Carte AV : marge avant 31,25 %, sur la DESTINATION FINALE (tous contrats avant 70,
