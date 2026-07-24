@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=90";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=90";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=90";
-import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation } from "./optim.js?v=90";
-import * as sync from "./sync.js?v=90";
-import { askAI } from "./ai.js?v=90";
+} from "./data.js?v=91";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=91";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=91";
+import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990 } from "./optim.js?v=91";
+import * as sync from "./sync.js?v=91";
+import { askAI } from "./ai.js?v=91";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2105,6 +2105,15 @@ function renderOptimiseur() {
   const palTagO = (p) => p === "franchise" ? '<span class="badge ok">franchise 0 %</span>' : p === "20" ? '<span class="badge" style="background:#fdf3e4;color:#96570a;border-color:#f3ddba">20 %</span>' : '<span class="badge" style="background:#ffe0dd;color:#b42318;border-color:#f3b8b0">31,25 %</span>';
   const avPAo = avParAssureEnfant(state); // scénario « rien consommé, tout aux enfants » (défaut)
   const nbDiffO = avPAo.rows.filter((r) => r.differe).length;
+  // Comparaison stratégie de CLAUSE bénéficiaire :
+  //  B = enfants désignés directs → chaque parent consomme son propre plafond au 1er/2ᵈ décès
+  //      (2 abattements de 152 500 €/enfant + 2 tranches à 20 %). C'est la vue « par assuré ».
+  //  A = « conjoint à défaut » → tout se concentre sur le survivant → UN seul plafond/enfant
+  //      (l'abattement du 1er décès est perdu).
+  const droitsClauseB = avPAo.parEnfant.reduce((s, e) => s + e.droits, 0);       // 2 plafonds (par assuré)
+  const droitsClauseA = avPAo.parEnfant.reduce((s, e) => s + droits990(e.capital), 0); // 1 plafond/enfant
+  const gainClause = Math.max(0, droitsClauseA - droitsClauseB);
+  const nbAssuresDistincts = new Set(avPAo.rows.map((r) => r.assure)).size;
   const avCard = avPAo.rows.length ? `
     <div class="card">
       <h2>🛡️ Assurance-vie — combien chaque enfant reçoit & la marge <span class="muted small">abatt. 152 500 € · 20 % → 700 000 € · 31,25 % au-delà</span></h2>
@@ -2131,6 +2140,20 @@ function renderOptimiseur() {
         </div>`).join("")}
       </div>
       <p class="muted small" style="margin:-6px 0 10px">C'est le <b>chiffre qui compte pour décider</b> : chaque parent ouvre son propre plafond de 852 500 € sur chaque enfant. « Peut encore verser » = cumul de ses plafonds restants sur les 3 enfants (réparti librement entre eux).</p>
+      ${nbAssuresDistincts >= 2 ? `<div class="card" style="background:linear-gradient(180deg,#fbfdff,#f4f8fe);border:1px solid var(--line);margin:0 0 14px">
+        <h3 style="margin:0 0 6px">⚖️ Optimisation de la clause bénéficiaire — le vrai levier</h3>
+        <p class="muted small" style="margin:0 0 10px">Avec ta clause actuelle « <b>conjoint à défaut enfants</b> », au 1er décès tout va au conjoint : <b>l'abattement 152 500 €/enfant du 1er parent est perdu</b> et tout se concentre sur le plafond du survivant. En <b>désignant les enfants directement</b>, chaque parent consomme SON plafond → <b>2 abattements</b> (305 000 €/enfant) + 2 tranches à 20 %.</p>
+        <div class="table-wrap"><table class="grid2">
+          <thead><tr><th>Stratégie de clause</th><th>Abattements enfants</th><th>Droits 990 I estimés</th></tr></thead>
+          <tbody>
+            <tr><td><b>A · Conjoint à défaut</b><br><span class="muted small">actuel · abattement du 1er décès perdu · concentration survivant</span></td><td class="num">152 500 €/enfant</td><td class="num droits">${eur2(droitsClauseA)}</td></tr>
+            <tr><td><b>B · Enfants désignés directs</b><br><span class="muted small">chaque parent utilise son plafond (1er ET 2ᵈ décès)</span></td><td class="num">305 000 €/enfant</td><td class="num net">${eur2(droitsClauseB)}</td></tr>
+          </tbody>
+        </table></div>
+        <div class="optim-verdict" style="margin-top:10px">${gainClause > 0
+          ? `💡 Passer en <b>clause « enfants désignés »</b> économiserait <b style="color:var(--accent-2)">${eur2(gainClause)}</b> de droits 990 I. <b>Arbitrage :</b> le conjoint survivant ne reçoit alors plus cette AV — mais avec ta communauté universelle (attribution intégrale), il est déjà protégé par le régime. À trancher avec le notaire (protection conjoint vs fiscalité enfants).`
+          : `✅ Ici les deux stratégies donnent le même coût (aucun enfant ne dépasse le 1er abattement). L'intérêt de désigner les enfants directement apparaît quand les capitaux par enfant dépassent 152 500 € par parent.`}</div>
+      </div>` : ""}
       <details><summary class="muted small" style="cursor:pointer;margin-bottom:6px">Détail jambe par jambe (assuré → enfant)</summary>
       <div class="table-wrap"><table class="grid2">
         <thead><tr><th>Assuré (au décès)</th><th>Enfant</th><th>Capital 990 I</th><th>Palier</th><th>Reste avant 31,25 %</th><th>Droits</th></tr></thead>
