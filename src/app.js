@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=89";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=89";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=89";
-import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation } from "./optim.js?v=89";
-import * as sync from "./sync.js?v=89";
-import { askAI } from "./ai.js?v=89";
+} from "./data.js?v=90";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=90";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=90";
+import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation } from "./optim.js?v=90";
+import * as sync from "./sync.js?v=90";
+import { askAI } from "./ai.js?v=90";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2057,6 +2057,49 @@ function renderOptimiseur() {
       <p class="muted small" style="margin-top:10px">⚠️ Montants <b>indicatifs</b> (hypothèses : revalo 2 %/an, espérance ${espDefaut} ans, tout le bien en NP). Ajuste chaque bien dans la carte Démembrement. À valider avec un notaire.</p>
     </div>`;
 
+  // --- CHECKLIST D'ACTIONS concrètes (cases persistées dans state.actionsFaites)
+  state.actionsFaites ||= {};
+  const rechargeAns = horizonRechargePleine(state);
+  const anneeRecharge = new Date().getFullYear() + rechargeAns;
+  const actionsPlan = [];
+  planActions.forEach((a, i) => actionsPlan.push({
+    key: `demem_${i}`,
+    titre: `${a.titre} → −${eur2(a.economie)}`,
+    comment: `Prendre RDV notaire : <b>donation-partage de la nue-propriété</b> aux 3 enfants. Prévoir les <b>statuts SCI</b> (gérance au parent) et une <b>convention de démembrement</b> (droits de rachat de l'usufruitier limités aux produits). Décider du % conservé en pleine propriété (ex. 10 % pour le contrôle).`,
+  }));
+  if (avMarge > 0) actionsPlan.push({
+    key: "av",
+    titre: `Alimenter l'assurance-vie avant 70 ans (marge ${eur2(avMarge)} à 20 %)`,
+    comment: `Verser en priorité via le parent qui a la plus grosse marge, en restant sous 700 000 € par tête. Vérifier la <b>clause bénéficiaire</b> et, pour un nouveau contrat, le mode de souscription (co-adhésion ?). Transmission <b>hors succession</b>.`,
+  });
+  if (capFranchise > 0) actionsPlan.push({
+    key: "don_now",
+    titre: `Ouvrir les donations en franchise disponibles (${eur2(capFranchise)})`,
+    comment: `Donner dès maintenant dans la limite des abattements restants (100 000 € /parent /enfant), acte notarié ou don manuel déclaré.`,
+  });
+  else actionsPlan.push({
+    key: "don_2038",
+    titre: `Programmer la réouverture des donations en ${anneeRecharge}`,
+    comment: `Tes abattements sont épuisés (recharge complète dans ~${rechargeAns} an(s)). Noter <b>${anneeRecharge}</b> : 100 000 € × 2 parents × ${nbEnfants} enfants = <b>${eur2(200000 * nbEnfants)}</b> transmissibles en franchise, renouvelable tous les 15 ans.`,
+  });
+  actionsPlan.push({
+    key: "rdv",
+    titre: "Valider le montage avec le notaire / fiscaliste",
+    comment: `Envoyer le <b>CSV du patrimoine</b> (onglet Données) + le mail préparé. Points à trancher : régime matrimonial (attribution intégrale vs coût abattement enfants), clauses AV, et la plus-value IR d'un éventuel <b>contrat de capitalisation démembré</b> (base non tranchée, QE Daubresse).`,
+  });
+  const nbFaites = actionsPlan.filter((a) => state.actionsFaites[a.key]).length;
+  const checklistCard = `
+    <div class="card">
+      <div class="section-head"><div><h2>✅ Ta checklist d'actions</h2><div class="small muted">Coche au fur et à mesure. Chaque action = un geste concret pour baisser les droits.</div></div><span class="badge ${nbFaites === actionsPlan.length ? "ok" : "neutral"}">${nbFaites}/${actionsPlan.length} fait</span></div>
+      <div class="reco-list">${actionsPlan.map((a) => {
+        const done = !!state.actionsFaites[a.key];
+        return `<label class="reco ${done ? "reco-ok" : "reco-action"}" style="cursor:pointer;align-items:flex-start">
+          <input type="checkbox" class="act-chk" data-k="${a.key}" ${done ? "checked" : ""} style="margin-top:3px;width:18px;height:18px;flex-shrink:0">
+          <span><b style="${done ? "text-decoration:line-through;opacity:.6" : ""}">${a.titre}</b><br><span class="muted small">${a.comment}</span></span>
+        </label>`;
+      }).join("")}</div>
+    </div>`;
+
   // --- Carte AV : marge avant 31,25 %, sur la DESTINATION FINALE (tous contrats avant 70,
   // y compris « conjoint à défaut enfants » reçus au 2ᵈ décès), par assuré → enfant.
   const palTagO = (p) => p === "franchise" ? '<span class="badge ok">franchise 0 %</span>' : p === "20" ? '<span class="badge" style="background:#fdf3e4;color:#96570a;border-color:#f3ddba">20 %</span>' : '<span class="badge" style="background:#ffe0dd;color:#b42318;border-color:#f3b8b0">31,25 %</span>';
@@ -2178,7 +2221,15 @@ function renderOptimiseur() {
       <div id="k_result"></div>
     </div>` : "";
 
-  c.innerHTML = cockpit + avCard + dememCard + capiCard + timingCard;
+  c.innerHTML = cockpit + checklistCard + avCard + dememCard + capiCard + timingCard;
+
+  // Cases à cocher de la checklist (persistées)
+  $$("#tab-content .act-chk").forEach((el) => el.addEventListener("change", (e2) => {
+    state.actionsFaites ||= {};
+    state.actionsFaites[e2.target.dataset.k] = e2.target.checked;
+    save();
+    renderOptimiseur();
+  }));
 
   // --- Interaction comparateur capitalisation
   if (capiBiens.length) {
