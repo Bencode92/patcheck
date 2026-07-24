@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=92";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=92";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=92";
-import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990 } from "./optim.js?v=92";
-import * as sync from "./sync.js?v=92";
-import { askAI } from "./ai.js?v=92";
+} from "./data.js?v=93";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=93";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=93";
+import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990 } from "./optim.js?v=93";
+import * as sync from "./sync.js?v=93";
+import { askAI } from "./ai.js?v=93";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2114,10 +2114,20 @@ function renderOptimiseur() {
   const droitsClauseA = avPAo.parEnfant.reduce((s, e) => s + droits990(e.capital), 0); // 1 plafond/enfant
   const gainClause = Math.max(0, droitsClauseA - droitsClauseB);
   const nbAssuresDistincts = new Set(avPAo.rows.map((r) => r.assure)).size;
+  // Phrase claire de marge de manœuvre + piège de l'ordre des décès
+  const nbConjointDefaut = (state.av || []).filter((a) => a.clauseType === "conjoint_defaut_enfants" && avAvant70Effectif(a, state.personnes)).length;
+  const margeTxt = avPAo.margeParAssure.map((m) => `<li><b>${m.assure}</b> peut encore verser <b style="color:var(--accent-2)">${eur2(m.marge)}</b> en AV (soit ~<b>${eur2(m.marge / nbEnfants)}</b> par enfant) avant d'atteindre le palier à 31,25 %.</li>`).join("");
   const avCard = avPAo.rows.length ? `
     <div class="card">
       <h2>🛡️ Assurance-vie — combien chaque enfant reçoit & la marge <span class="muted small">abatt. 152 500 € · 20 % → 700 000 € · 31,25 % au-delà</span></h2>
-      <p class="muted small">Scénario <b>« rien n'est consommé »</b> : on suppose que le conjoint ne dépense rien et que <b>TOUTE</b> ton assurance-vie avant 70 ans finit chez les 3 enfants (clause « conjoint à défaut » et contrats sans clause compris). Le plafond 852 500 € s'apprécie <b>par assuré → enfant</b> (chaque parent ouvre le sien).</p>
+      <div class="optim-verdict" style="margin:0 0 14px;border-left-color:var(--accent-2)">
+        <b>💡 Concrètement, ta marge de manœuvre en AV (à 20 %) :</b>
+        <ul style="margin:6px 0 8px;padding-left:20px">${margeTxt}</ul>
+        ${nbConjointDefaut > 0
+          ? `<div style="border-top:1px solid var(--line);padding-top:8px"><b style="color:var(--warn)">⚠️ Le piège de l'ordre des décès :</b> tu as <b>${nbConjointDefaut} contrat(s) en « conjoint à défaut »</b>. Au 1er décès, ils vont au conjoint (exonéré) → l'abattement du 1er parent est <b>perdu</b>, et au 2ᵈ décès tout retombe sur <b>le seul plafond du survivant</b> → tu tapes le 31,25 % bien plus vite. La marge ci-dessus (répartie sur 2 parents) n'est <b>réellement acquise que si tu désignes les enfants en direct</b> (voir « quel contrat changer » plus bas).</div>`
+          : `<div style="border-top:1px solid var(--line);padding-top:8px">✅ Tes contrats désignent les enfants en direct → chaque parent utilise bien son propre plafond. La marge ci-dessus est pleinement acquise.</div>`}
+      </div>
+      <p class="muted small">Détail par enfant (scénario « tout aux enfants ») — le plafond 852 500 € s'apprécie <b>par assuré → enfant</b> :</p>
       <div class="benef-cards" style="margin-bottom:10px">${avPAo.parEnfant.map((e) => {
         const full = e.capaciteAvant3125 <= 0;
         return `<div class="benef-card">
