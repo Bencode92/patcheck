@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=91";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=91";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents } from "./graph.js?v=91";
-import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990 } from "./optim.js?v=91";
-import * as sync from "./sync.js?v=91";
-import { askAI } from "./ai.js?v=91";
+} from "./data.js?v=92";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=92";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=92";
+import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990 } from "./optim.js?v=92";
+import * as sync from "./sync.js?v=92";
+import { askAI } from "./ai.js?v=92";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2153,6 +2153,30 @@ function renderOptimiseur() {
         <div class="optim-verdict" style="margin-top:10px">${gainClause > 0
           ? `💡 Passer en <b>clause « enfants désignés »</b> économiserait <b style="color:var(--accent-2)">${eur2(gainClause)}</b> de droits 990 I. <b>Arbitrage :</b> le conjoint survivant ne reçoit alors plus cette AV — mais avec ta communauté universelle (attribution intégrale), il est déjà protégé par le régime. À trancher avec le notaire (protection conjoint vs fiscalité enfants).`
           : `✅ Ici les deux stratégies donnent le même coût (aucun enfant ne dépasse le 1er abattement). L'intérêt de désigner les enfants directement apparaît quand les capitaux par enfant dépassent 152 500 € par parent.`}</div>
+        <h4 style="margin:14px 0 6px">🔎 Contrat par contrat — lequel changer</h4>
+        <div class="table-wrap"><table class="grid2">
+          <thead><tr><th>Contrat</th><th>Assuré</th><th>Montant</th><th>Régime</th><th>Clause actuelle</th><th>Action</th></tr></thead>
+          <tbody>${(state.av || []).map((a) => {
+            const av70 = avAvant70Effectif(a, state.personnes);
+            const sousc = personne(a.souscripteurId)?.nom || "—";
+            const bensEnf = (a.beneficiaires || []).filter((b) => personne(b)?.role === "enfant");
+            const clause = a.clauseType === "conjoint_defaut_enfants" ? "Conjoint à défaut enfants" : (bensEnf.length ? "Enfants désignés" : (a.beneficiaires || []).length ? "Bénéficiaires désignés" : "Aucune clause");
+            let action, cls;
+            if (!av70) { action = "Hors 990 I (après 70 / PER) — régime 757 B"; cls = "muted"; }
+            else if (a.clauseType === "conjoint_defaut_enfants") { action = `🔧 <b>Passer en « enfants désignés »</b> → utilise l'abattement de ${sousc} au 1er décès`; cls = "warn"; }
+            else if (!(a.beneficiaires || []).length) { action = "⚠️ Aucune clause renseignée → à définir (onglet AV)"; cls = "warn"; }
+            else if (bensEnf.length) { action = "✅ Enfants désignés — déjà optimal"; cls = "ok"; }
+            else { action = "Bénéficiaires hors enfants — à vérifier"; cls = "muted"; }
+            return `<tr>
+              <td><b>${a.libelle || "AV"}</b></td><td>${sousc}</td>
+              <td class="num">${eur2(a.montant)}</td>
+              <td class="small">${av70 ? "990 I (avant 70)" : "757 B (après 70)"}</td>
+              <td class="small">${clause}</td>
+              <td class="small ${cls === "warn" ? "" : ""}" style="${cls === "warn" ? "color:var(--warn)" : cls === "ok" ? "color:var(--accent-2)" : "color:var(--muted)"}">${action}</td>
+            </tr>`;
+          }).join("")}</tbody>
+        </table></div>
+        <p class="muted small" style="margin-top:6px">Les contrats <span style="color:var(--warn)">🔧</span> sont ceux à faire évoluer : change leur clause dans l'onglet 🛡️ Assurance-vie (sélecteur « Type de clause bénéficiaire ») → « Bénéficiaires désignés » en cochant tes 3 enfants.</p>
       </div>` : ""}
       <details><summary class="muted small" style="cursor:pointer;margin-bottom:6px">Détail jambe par jambe (assuré → enfant)</summary>
       <div class="table-wrap"><table class="grid2">
