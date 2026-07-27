@@ -3,11 +3,11 @@
 //  Consomme debrief(state) + barèmes data.js. Zéro DOM.
 //  Tout est INDICATIF, à valider avec un notaire.
 // =============================================================
-import { debrief, avAvant70Effectif } from "./graph.js?v=95";
+import { debrief, avAvant70Effectif } from "./graph.js?v=96";
 import {
   ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70,
   BAREME_LIGNE_DIRECTE, calculDroits, tauxUsufruit,
-} from "./data.js?v=95";
+} from "./data.js?v=96";
 
 const PLAFOND_AV = AV_AVANT_70.abattement; // 152 500 € / bénéficiaire (990 I)
 
@@ -200,7 +200,10 @@ export function comparerVehicules(p) {
   const anneesDeces = Math.max(0, Number(p.anneesDeces) || 0);
   const val = X * Math.pow(r, anneesDeces);          // valeur au décès
   const gain = Math.max(0, val - X);
-  const abattSucc = ABATTEMENTS.enfant * nPar;        // 100 000 €/parent/enfant
+  // Abattement succession/enfant : par défaut 100 000 €/parent, mais on peut passer
+  // l'abattement RÉELLEMENT disponible (réduit par les donations déjà faites, via
+  // abattementMoyenADate) pour connecter le calcul au patrimoine saisi.
+  const abattSucc = p.abattSuccParEnfant != null ? Math.max(0, Number(p.abattSuccParEnfant)) : ABATTEMENTS.enfant * nPar;
   const avAvant70 = (Number(p.ageSouscripteur) || 0) < 70;
   // marge 990 I encore libre par enfant (852 500 − déjà destiné), si fournie ; sinon plafond plein
   const dejaAv = Math.max(0, Number(p.avDejaParEnfant) || 0);

@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=95";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=95";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=95";
-import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules } from "./optim.js?v=95";
-import * as sync from "./sync.js?v=95";
-import { askAI } from "./ai.js?v=95";
+} from "./data.js?v=96";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=96";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=96";
+import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules } from "./optim.js?v=96";
+import * as sync from "./sync.js?v=96";
+import { askAI } from "./ai.js?v=96";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2266,8 +2266,9 @@ function renderOptimiseur() {
       </div>
       <div class="form-row">
         <label>Années avant transmission (décès)<input type="number" id="ve_t" value="${Math.max(0, espDefaut - ageParentDefaut)}" min="0" max="60"></label>
-        <label>Déjà placé en AV /enfant (€)<input type="text" id="ve_avdeja" value="0"><span class="muted small" style="display:block">pour situer la marge 990 I restante</span></label>
+        <label>Déjà placé en AV /enfant (€)<input type="text" id="ve_avdeja" value="${Math.round((avParAssureEnfant(state).parEnfant.reduce((s, e) => s + e.capital, 0) / nbEnfants) || 0)}"><span class="muted small" style="display:block">✅ auto depuis ton AV — situe la marge 990 I restante</span></label>
       </div>
+      <p class="muted small" style="margin:-4px 0 6px">🔗 <b>Connecté à ton patrimoine</b> : l'AV déjà placée par enfant et l'abattement de succession réellement disponible (réduit par tes donations, rechargé à la date de transmission) sont pris en compte automatiquement.</p>
       <button id="ve_go" class="btn primary">Comparer les enveloppes</button>
       <div id="ve_result"></div>
     </div>`;
@@ -2301,13 +2302,15 @@ function renderOptimiseur() {
   // --- Interaction comparateur d'enveloppes
   {
     const runVe = () => {
+      const tIn = parseNum($("#ve_t").value);
       const res = comparerVehicules({
         montant: parseNum($("#ve_montant").value),
         ageSouscripteur: parseNum($("#ve_age").value),
         rendement: parseNum($("#ve_r").value),
-        anneesDeces: parseNum($("#ve_t").value),
+        anneesDeces: tIn,
         nbParents, nbEnfants,
         avDejaParEnfant: parseNum($("#ve_avdeja").value),
+        abattSuccParEnfant: abattementMoyenADate(state, tIn), // abattement réel à la transmission (donations cumulées)
       });
       const eco = (l) => l.key === res.best ? '<span class="badge ok">le plus avantageux</span>' : `<span class="muted small">−${eur2(res.lignes.find((x) => x.key === res.best).net - l.net)} net</span>`;
       $("#ve_result").innerHTML = `
@@ -2330,7 +2333,7 @@ function renderOptimiseur() {
           const horizons = [0, 5, 10, 15, 20, 30];
           const nomCourt = { av: "AV", capi: "Capi", capi_dem: "Capi démembré", cto: "CTO" };
           const rows = horizons.map((h) => {
-            const rr = comparerVehicules({ ...base, anneesDeces: h });
+            const rr = comparerVehicules({ ...base, anneesDeces: h, abattSuccParEnfant: abattementMoyenADate(state, h) });
             return { h, valeur: rr.valeurDeces, lignes: rr.lignes, best: rr.best };
           });
           return `<h3 style="margin:16px 0 6px">⏳ Selon l'horizon — c'est LE paramètre clé</h3>
