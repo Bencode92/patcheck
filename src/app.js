@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=94";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=94";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=94";
-import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules } from "./optim.js?v=94";
-import * as sync from "./sync.js?v=94";
-import { askAI } from "./ai.js?v=94";
+} from "./data.js?v=95";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=95";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=95";
+import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules } from "./optim.js?v=95";
+import * as sync from "./sync.js?v=95";
+import { askAI } from "./ai.js?v=95";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2324,6 +2324,28 @@ function renderOptimiseur() {
         </table></div>
         <div class="optim-verdict" style="margin-top:10px"><b>Verdict :</b> pour transmettre au moindre coût, <b>« ${res.lignes.find((l) => l.key === res.best).nom} »</b> laisse le plus net aux enfants.
         <ul style="margin:8px 0 0;padding-left:18px">${res.lignes.map((l) => `<li class="small"><b>${l.nom.split(" — ")[0]}</b> : ${l.note}</li>`).join("")}</ul></div>
+        ${(() => {
+          // Sensibilité à L'HORIZON : quelle enveloppe gagne selon le nb d'années avant transmission
+          const base = { montant: parseNum($("#ve_montant").value), ageSouscripteur: parseNum($("#ve_age").value), rendement: parseNum($("#ve_r").value), nbParents, nbEnfants, avDejaParEnfant: parseNum($("#ve_avdeja").value) };
+          const horizons = [0, 5, 10, 15, 20, 30];
+          const nomCourt = { av: "AV", capi: "Capi", capi_dem: "Capi démembré", cto: "CTO" };
+          const rows = horizons.map((h) => {
+            const rr = comparerVehicules({ ...base, anneesDeces: h });
+            return { h, valeur: rr.valeurDeces, lignes: rr.lignes, best: rr.best };
+          });
+          return `<h3 style="margin:16px 0 6px">⏳ Selon l'horizon — c'est LE paramètre clé</h3>
+          <p class="muted small" style="margin:0 0 8px">La meilleure enveloppe change surtout avec le <b>temps avant transmission</b>. Net transmis par horizon (rendement ${parseNum($("#ve_r").value)} %/an en hypothèse) :</p>
+          <div class="table-wrap"><table class="grid2">
+            <thead><tr><th>Horizon</th><th>Valeur transmise</th>${res.lignes.map((l) => `<th>${nomCourt[l.key]}</th>`).join("")}<th>Gagnant</th></tr></thead>
+            <tbody>${rows.map((row) => `<tr>
+              <td><b>${row.h === 0 ? "aujourd'hui" : "dans " + row.h + " ans"}</b></td>
+              <td class="num muted">${eur2(row.valeur)}</td>
+              ${row.lignes.map((l) => `<td class="num ${l.key === row.best ? "net" : ""}" style="${l.key === row.best ? "font-weight:700" : ""}">${eur2(l.net)}</td>`).join("")}
+              <td><span class="badge ok">${nomCourt[row.best]}</span></td>
+            </tr>`).join("")}</tbody>
+          </table></div>
+          <p class="muted small" style="margin-top:6px">💡 Lecture : à <b>court terme</b> le CTO/capi (step-up, souplesse) tiennent ; à <b>long terme</b> le <b>démembrement</b> et l'<b>AV avant 70</b> creusent l'écart (gel de valeur + abattements). L'horizon prime sur le rendement.</p>`;
+        })()}
         <p class="muted small" style="margin-top:6px">💡 Choix aussi selon ton <b>objectif</b> : transmission pure → AV avant 70 / capi démembré ; besoin de <b>souplesse et revenus</b> → CTO (step-up au décès mais PFU 30 % du vivant) ; <b>gros patrimoine au-delà des plafonds AV</b> → capi (barème succession ~20 % plutôt que 31,25 %). À valider avec un conseiller.</p>`;
     };
     $("#ve_go").addEventListener("click", runVe);
