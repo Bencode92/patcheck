@@ -3,11 +3,11 @@
 //  Consomme debrief(state) + barèmes data.js. Zéro DOM.
 //  Tout est INDICATIF, à valider avec un notaire.
 // =============================================================
-import { debrief, avAvant70Effectif } from "./graph.js?v=93";
+import { debrief, avAvant70Effectif } from "./graph.js?v=94";
 import {
   ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70,
   BAREME_LIGNE_DIRECTE, calculDroits, tauxUsufruit,
-} from "./data.js?v=93";
+} from "./data.js?v=94";
 
 const PLAFOND_AV = AV_AVANT_70.abattement; // 152 500 € / bénéficiaire (990 I)
 
@@ -182,6 +182,65 @@ export function avParAssureEnfant(state, opts = {}) {
   const margeTotale = rows.reduce((s, r) => s + r.capaciteAvant3125, 0);
   const totalDroits = rows.reduce((s, r) => s + r.droits, 0);
   return { rows, parEnfant, seuil3125, plafond: PLAFOND_AV, totalAvGlobal, totalCouvert, apres70, versAutres, sansBeneficiaire, supposeEnfants, margeParAssure, margeTotale, totalDroits };
+}
+
+// Comparateur d'ENVELOPPES pour un montant X à investir : où loger l'argent pour
+// que la transmission aux enfants coûte le moins cher ? Compare 4 véhicules :
+//   - Assurance-vie AVANT 70 ans (990 I) : hors succession, abatt 152 500 €/bénéf, 20 %/31,25 %.
+//   - Assurance-vie APRÈS 70 ans (757 B) : abatt global 30 500 €, primes réintégrées succession, GAINS exonérés.
+//   - Contrat de CAPITALISATION : dans la succession (barème ligne directe) ; DÉMEMBRABLE (donner la NP maintenant → base réduite au barème 669) ; pas de step-up des plus-values.
+//   - CTO (compte-titres) : dans la succession (barème ligne directe) au décès, mais STEP-UP (plus-values purgées pour les héritiers).
+// params : { montant, ageSouscripteur, rendement(%/an), anneesDeces, nbParents, nbEnfants,
+//            avPlafondRestantParEnfant (marge 990 I déjà utilisée ailleurs, optionnel) }
+export function comparerVehicules(p) {
+  const X = Math.max(0, Number(p.montant) || 0);
+  const r = 1 + (Number(p.rendement) || 0) / 100;
+  const nEnf = Math.max(1, p.nbEnfants || 1);
+  const nPar = Math.max(1, p.nbParents || 1);
+  const anneesDeces = Math.max(0, Number(p.anneesDeces) || 0);
+  const val = X * Math.pow(r, anneesDeces);          // valeur au décès
+  const gain = Math.max(0, val - X);
+  const abattSucc = ABATTEMENTS.enfant * nPar;        // 100 000 €/parent/enfant
+  const avAvant70 = (Number(p.ageSouscripteur) || 0) < 70;
+  // marge 990 I encore libre par enfant (852 500 − déjà destiné), si fournie ; sinon plafond plein
+  const dejaAv = Math.max(0, Number(p.avDejaParEnfant) || 0);
+
+  // 1) Assurance-vie
+  let droitsAV, noteAV, avValeurTransmise = val;
+  if (avAvant70) {
+    // 990 I : capital = valeur au décès (primes + gains), par enfant, sur le plafond RESTANT
+    const parEnf = val / nEnf;
+    droitsAV = nEnf * droits990(dejaAv + parEnf) - nEnf * droits990(dejaAv); // droits marginaux au-dessus du déjà-placé
+    droitsAV = Math.max(0, Math.round(droitsAV));
+    noteAV = "990 I : hors succession, abattement 152 500 €/enfant puis 20 % (jusqu'à 852 500 €), 31,25 % au-delà. Gains transmis en franchise dans le plafond.";
+  } else {
+    // 757 B : primes (X) réintégrées à la succession au-delà de 30 500 € ; GAINS exonérés
+    const baseReintegree = Math.max(0, X - 30500);
+    droitsAV = droitsLD(baseReintegree, abattSucc, nEnf);
+    avValeurTransmise = val; // les gains passent en franchise
+    noteAV = "757 B (après 70 ans) : seules les PRIMES (au-delà de 30 500 €) réintègrent la succession ; les GAINS sont transmis en franchise. Reste soumis au barème succession.";
+  }
+
+  // 2) Contrat de capitalisation — non démembré (succession) vs démembré (donner la NP maintenant)
+  const droitsCapi = droitsLD(val, abattSucc, nEnf);
+  const npNow = 1 - tauxUsufruit(Number(p.ageSouscripteur) || 60);
+  const droitsCapiDem = droitsLD(X * npNow, abattSucc, nEnf); // base = valeur actuelle × NP (669), gel de la revalo
+
+  // 3) CTO — succession au décès (barème ligne directe) + step-up (PV purgée pour héritiers)
+  const droitsCTO = droitsLD(val, abattSucc, nEnf);
+
+  const lignes = [
+    { key: "av", nom: avAvant70 ? "Assurance-vie (avant 70 ans)" : "Assurance-vie (après 70 ans)", droits: droitsAV, net: val - droitsAV, note: noteAV,
+      atouts: avAvant70 ? ["Hors succession", "Abattement 152 500 €/enfant", "Gains transmis en franchise"] : ["Gains exonérés", "Abattement 30 500 €"] , liquidite: "bonne (rachats, abatt. 4 600/9 200 € après 8 ans)" },
+    { key: "capi", nom: "Contrat de capitalisation", droits: droitsCapi, net: val - droitsCapi, note: "Dans la succession (barème ligne directe). Antériorité fiscale conservée par l'héritier. Pas de step-up des plus-values.",
+      atouts: ["Démembrable", "Antériorité fiscale conservée"], liquidite: "bonne (comme l'AV)" },
+    { key: "capi_dem", nom: "Contrat de capitalisation — DÉMEMBRÉ (donner la NP maintenant)", droits: droitsCapiDem, net: val - droitsCapiDem, note: `Donner la nue-propriété aujourd'hui : base taxée = ${Math.round(npNow*100)} % (barème 669 à ${p.ageSouscripteur} ans). La revalorisation future échappe aux droits. ⚠️ plus-value IR non purgée au rachat (§225).`,
+      atouts: ["Base réduite (669)", "Gel de la revalorisation", "Garde l'usufruit"], liquidite: "réduite (usufruit/NP séparés)" },
+    { key: "cto", nom: "Compte-titres ordinaire (CTO)", droits: droitsCTO, net: val - droitsCTO, note: "Dans la succession (barème ligne directe). STEP-UP au décès : les plus-values latentes sont PURGÉES (les héritiers repartent à la valeur du décès). Souplesse totale, mais fiscalité des revenus au PFU 30 % du vivant.",
+      atouts: ["Step-up des PV au décès", "Souplesse totale", "Aucun plafond"], liquidite: "totale (aucune contrainte)" },
+  ];
+  const best = lignes.reduce((a, b) => (b.net > a.net ? b : a)).key;
+  return { lignes, best, valeurDeces: val, gain, montant: X, anneesDeces };
 }
 
 // Comparateur fiscal d'un CONTRAT DE CAPITALISATION : donation NP démembrée (A)

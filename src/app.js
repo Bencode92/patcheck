@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=93";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=93";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=93";
-import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990 } from "./optim.js?v=93";
-import * as sync from "./sync.js?v=93";
-import { askAI } from "./ai.js?v=93";
+} from "./data.js?v=94";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=94";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=94";
+import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules } from "./optim.js?v=94";
+import * as sync from "./sync.js?v=94";
+import { askAI } from "./ai.js?v=94";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2254,6 +2254,24 @@ function renderOptimiseur() {
       <p class="muted small" style="margin-top:8px">Total transmissible en franchise dès maintenant : <b style="color:var(--accent-2)">${eur2(timing.capaciteExoneree)}</b>. Chaque fenêtre « disponible » gagne à être ouverte tôt (le compteur des 15 ans redémarre à la donation).</p>
     </div>` : "";
 
+  // --- Carte comparateur d'ENVELOPPES : où investir X (AV / capi / CTO) ?
+  const vehiculeCard = `
+    <div class="card">
+      <h2>💼 Où investir ? — AV vs contrat de capitalisation vs CTO</h2>
+      <p class="muted small">Tu veux placer une somme et la transmettre au mieux ? Cet outil compare les <b>enveloppes</b> selon le coût de transmission aux enfants. Renseigne le montant et tes paramètres.</p>
+      <div class="form-row">
+        <label>Montant à investir (€)<input type="text" id="ve_montant" value="500000"></label>
+        <label>Âge du souscripteur<input type="number" id="ve_age" value="${ageParentDefaut}" min="18" max="95"></label>
+        <label>Rendement (%/an)<input type="number" id="ve_r" value="3" min="0" max="10" step="0.5"></label>
+      </div>
+      <div class="form-row">
+        <label>Années avant transmission (décès)<input type="number" id="ve_t" value="${Math.max(0, espDefaut - ageParentDefaut)}" min="0" max="60"></label>
+        <label>Déjà placé en AV /enfant (€)<input type="text" id="ve_avdeja" value="0"><span class="muted small" style="display:block">pour situer la marge 990 I restante</span></label>
+      </div>
+      <button id="ve_go" class="btn primary">Comparer les enveloppes</button>
+      <div id="ve_result"></div>
+    </div>`;
+
   // --- Carte comparateur contrat de capitalisation (données réelles)
   const capiBiens = biens.filter((b) => b.categorie === "capitalisation");
   const capiCard = capiBiens.length ? `
@@ -2278,7 +2296,39 @@ function renderOptimiseur() {
       <div id="k_result"></div>
     </div>` : "";
 
-  c.innerHTML = cockpit + checklistCard + avCard + dememCard + capiCard + timingCard;
+  c.innerHTML = cockpit + checklistCard + avCard + vehiculeCard + dememCard + capiCard + timingCard;
+
+  // --- Interaction comparateur d'enveloppes
+  {
+    const runVe = () => {
+      const res = comparerVehicules({
+        montant: parseNum($("#ve_montant").value),
+        ageSouscripteur: parseNum($("#ve_age").value),
+        rendement: parseNum($("#ve_r").value),
+        anneesDeces: parseNum($("#ve_t").value),
+        nbParents, nbEnfants,
+        avDejaParEnfant: parseNum($("#ve_avdeja").value),
+      });
+      const eco = (l) => l.key === res.best ? '<span class="badge ok">le plus avantageux</span>' : `<span class="muted small">−${eur2(res.lignes.find((x) => x.key === res.best).net - l.net)} net</span>`;
+      $("#ve_result").innerHTML = `
+        <p class="muted small" style="margin-top:10px">Montant <b>${eur2(res.montant)}</b> → valeur estimée à la transmission (dans ${res.anneesDeces} ans) : <b>${eur2(res.valeurDeces)}</b> (dont ${eur2(res.gain)} de gains).</p>
+        <div class="table-wrap"><table class="grid2">
+          <thead><tr><th>Enveloppe</th><th>Droits de transmission</th><th>Net transmis</th><th>Liquidité</th><th></th></tr></thead>
+          <tbody>${res.lignes.map((l) => `<tr>
+            <td><b>${l.nom}</b><br><span class="muted small">${l.atouts.map((a) => `<span class="badge ok" style="margin:1px 2px 1px 0">${a}</span>`).join("")}</span></td>
+            <td class="num droits">${eur2(l.droits)}</td>
+            <td class="num net"><b>${eur2(l.net)}</b></td>
+            <td class="small muted">${l.liquidite}</td>
+            <td>${eco(l)}</td>
+          </tr>`).join("")}</tbody>
+        </table></div>
+        <div class="optim-verdict" style="margin-top:10px"><b>Verdict :</b> pour transmettre au moindre coût, <b>« ${res.lignes.find((l) => l.key === res.best).nom} »</b> laisse le plus net aux enfants.
+        <ul style="margin:8px 0 0;padding-left:18px">${res.lignes.map((l) => `<li class="small"><b>${l.nom.split(" — ")[0]}</b> : ${l.note}</li>`).join("")}</ul></div>
+        <p class="muted small" style="margin-top:6px">💡 Choix aussi selon ton <b>objectif</b> : transmission pure → AV avant 70 / capi démembré ; besoin de <b>souplesse et revenus</b> → CTO (step-up au décès mais PFU 30 % du vivant) ; <b>gros patrimoine au-delà des plafonds AV</b> → capi (barème succession ~20 % plutôt que 31,25 %). À valider avec un conseiller.</p>`;
+    };
+    $("#ve_go").addEventListener("click", runVe);
+    runVe();
+  }
 
   // Cases à cocher de la checklist (persistées)
   $$("#tab-content .act-chk").forEach((el) => el.addEventListener("change", (e2) => {
