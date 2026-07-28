@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=99";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=99";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=99";
-import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules } from "./optim.js?v=99";
-import * as sync from "./sync.js?v=99";
-import { askAI } from "./ai.js?v=99";
+} from "./data.js?v=100";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=100";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=100";
+import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules } from "./optim.js?v=100";
+import * as sync from "./sync.js?v=100";
+import { askAI } from "./ai.js?v=100";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2346,7 +2346,20 @@ function renderOptimiseur() {
             <td class="num ${v.margeAuj > 0 ? "net" : "droits"}"><b>${v.margeAuj > 0 ? eur2(v.margeAuj) : "0 € ⚠️"}</b></td>
           </tr>`).join("")}</tbody>
         </table></div>
-        <p class="muted small" style="margin-top:8px">💡 Lecture : chaque enfant a aujourd'hui un capital AV qui, à ${perf} %/an, sera <b>×${facteur.toFixed(1)}</b> dans ${n} ans. S'il dépasse alors 852 500 €, la part au-dessus sera taxée à <b>31,25 %</b> → <b>ne verse plus en AV pour du long terme</b>, bascule sur <b>contrat de capitalisation / CTO</b> (carte « 💼 Où investir ? »). ${rows.every((v) => v.margeAuj <= 0) ? "<b>Ici : marge déjà nulle sur les deux parents.</b>" : ""}</p>`;
+        <p class="muted small" style="margin-top:8px">💡 Lecture : chaque enfant a aujourd'hui un capital AV qui, à ${perf} %/an, sera <b>×${facteur.toFixed(1)}</b> dans ${n} ans. S'il dépasse alors 852 500 €, la part au-dessus sera taxée à <b>31,25 %</b>.</p>
+        ${(() => {
+          const maxAvParParent = rows.map((v) => ({ assure: v.assure, montant: v.margeAuj * nbEnfants })); // marge/enfant × nb enfants
+          const totalAvOpt = maxAvParParent.reduce((s, x) => s + x.montant, 0);
+          return `<div class="optim-verdict" style="margin-top:6px;border-left-color:var(--accent-2)">
+            <b>🎯 Comment optimiser — l'allocation à viser :</b>
+            <ol style="margin:8px 0 0;padding-left:20px">
+              <li><b>En AV (enfants désignés directs)</b> : place au maximum ${maxAvParParent.map((x) => `${x.montant > 0 ? `<b>${eur2(x.montant)}</b> via ${x.assure}` : `rien via ${x.assure} (déjà plein)`}`).join(" et ")}${totalAvOpt > 0 ? ` — soit <b style="color:var(--accent-2)">${eur2(totalAvOpt)}</b> au total</b>, qui resteront à 20 % même après ${n} ans de croissance.` : ` : <b>ne rien ajouter en AV</b> (le plafond est déjà atteint en projection).`}</li>
+              <li><b>Au-delà / nouveaux placements longs</b> : <b>contrat de capitalisation démembré</b> (base gelée au barème 669, revalorisation hors droits) ou <b>CTO</b> (step-up au décès). Voir « 💼 Où investir ? ».</li>
+              <li><b>Passer tes contrats « conjoint à défaut » en « enfants désignés »</b> pour utiliser les 2 plafonds (Christophe + Catherine) — voir la comparaison A/B plus haut.</li>
+              <li><b>Démembrer la SCI Beaujon</b> maintenant : c'est le plus gros levier (donner la nue-propriété, garder l'usufruit).</li>
+            </ol>
+          </div>`;
+        })()}`;
     };
     $("#avp_r").addEventListener("input", runPerf);
     $("#avp_n").addEventListener("input", runPerf);
