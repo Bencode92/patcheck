@@ -3,3 +3,10 @@ node_modules/
 *.log
 patrimoine-famille.json
 sim/*.png
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
