@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=98";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=98";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=98";
-import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules } from "./optim.js?v=98";
-import * as sync from "./sync.js?v=98";
-import { askAI } from "./ai.js?v=98";
+} from "./data.js?v=99";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=99";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=99";
+import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules } from "./optim.js?v=99";
+import * as sync from "./sync.js?v=99";
+import { askAI } from "./ai.js?v=99";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2301,11 +2301,11 @@ function renderOptimiseur() {
   // s'apprécie sur le capital transmis au DÉCÈS = primes + gains).
   const avPerfCard = avPAo.rows.length ? `
     <div class="card">
-      <h2>🔮 Marge AV réelle — la performance compte <span class="muted small">le plafond 852 500 € porte sur le capital au décès (primes + gains)</span></h2>
-      <p class="muted small">Ton assurance-vie actuelle va <b>grossir jusqu'au décès</b> et « manger » une partie du plafond. La vraie marge à placer <b>aujourd'hui</b> est donc plus petite que le simple « 852 500 − capital actuel ».</p>
+      <h2>🔮 Projection AV — où serai-je dans X années ? <span class="muted small">le plafond 852 500 € porte sur le capital (primes + gains)</span></h2>
+      <p class="muted small">Fige une <b>performance annuelle</b> et un <b>nombre d'années</b> : l'outil projette ce que vaudra ton AV et te dit si tu passes le plafond des 20 % (au-delà = 31,25 %).</p>
       <div class="form-row">
-        <label>Performance attendue (%/an)<input type="number" id="avp_r" value="3" min="0" max="10" step="0.5"></label>
-        <label>Années avant transmission<input type="number" id="avp_n" value="${Math.max(0, espDefaut - ageParentDefaut)}" min="0" max="60"></label>
+        <label>Performance annuelle (%/an)<input type="number" id="avp_r" value="3" min="0" max="10" step="0.5"></label>
+        <label>Dans combien d'années ?<input type="number" id="avp_n" value="15" min="1" max="60"></label>
       </div>
       <div id="avp_result"></div>
     </div>` : "";
@@ -2327,26 +2327,26 @@ function renderOptimiseur() {
       const rows = Object.entries(legsParParent).map(([assure, caps]) => {
         const nb = Math.max(1, caps.length);
         const auj = caps.reduce((a, b) => a + b, 0) / nb;   // capital actuel PAR ENFANT (de ce parent)
-        const deces = auj * facteur;                        // projeté au décès PAR ENFANT
+        const futur = auj * facteur;                        // projeté dans N ans PAR ENFANT
         const margeAuj = Math.max(0, plafondAuj - auj);     // ce qu'on peut ajouter AUJOURD'HUI par enfant
-        return { assure, auj, deces, margeAuj, depasse: deces > SEUIL };
+        return { assure, auj, futur, margeAuj, depasse: futur > SEUIL };
       });
       $("#avp_result").innerHTML = `
         <div class="optim-verdict" style="margin:10px 0;border-left-color:${rows.some((v) => v.depasse) ? "var(--warn)" : "var(--accent-2)"}">
-          Avec <b>${perf} %/an sur ${n} ans</b>, tout capital est multiplié par <b>×${facteur.toFixed(1)}</b>.<br>
-          Donc le plafond à 20 % de 852 500 €/enfant <b>au décès</b> = seulement <b>${eur2(plafondAuj)}/enfant placé AUJOURD'HUI</b> (au-delà, la croissance te fait taper le 31,25 %).
+          Si tu figes <b>${perf} %/an pendant ${n} ans</b> → tout capital est multiplié par <b>×${facteur.toFixed(1)}</b>.<br>
+          Le plafond des 20 % (852 500 €/enfant) correspond alors à seulement <b>${eur2(plafondAuj)} placés aujourd'hui/enfant</b> : au-dessus, la croissance te fait dépasser et taper le <b>31,25 %</b>.
         </div>
         <div class="table-wrap"><table class="grid2">
-          <thead><tr><th>Parent-assuré</th><th>AV actuelle / enfant</th><th>→ au décès (×${facteur.toFixed(1)})</th><th>vs plafond 852 500 €</th><th>Peut encore placer aujourd'hui /enfant</th></tr></thead>
+          <thead><tr><th>Parent-assuré</th><th>AV aujourd'hui / enfant</th><th>Dans ${n} ans (×${facteur.toFixed(1)})</th><th>vs plafond 852 500 €</th><th>Peut encore placer aujourd'hui /enfant</th></tr></thead>
           <tbody>${rows.map((v) => `<tr>
             <td><b>${v.assure}</b></td>
             <td class="num">${eur2(v.auj)}</td>
-            <td class="num">${eur2(v.deces)}</td>
-            <td class="num ${v.depasse ? "droits" : "net"}">${v.depasse ? `dépassé de ${eur2(v.deces - SEUIL)} → 31,25 %` : `sous le plafond`}</td>
+            <td class="num">${eur2(v.futur)}</td>
+            <td class="num ${v.depasse ? "droits" : "net"}">${v.depasse ? `dépassé de ${eur2(v.futur - SEUIL)} → 31,25 %` : `sous le plafond ✅`}</td>
             <td class="num ${v.margeAuj > 0 ? "net" : "droits"}"><b>${v.margeAuj > 0 ? eur2(v.margeAuj) : "0 € ⚠️"}</b></td>
           </tr>`).join("")}</tbody>
         </table></div>
-        <p class="muted small" style="margin-top:8px">💡 Lecture : ton AV actuelle par enfant <b>grossit ×${facteur.toFixed(1)}</b> d'ici le décès. Si elle dépasse alors 852 500 €, tu es <b>déjà dans le 31,25 %</b> sans rien ajouter → <b>ne verse plus en AV</b>, mets les nouveaux placements longs sur <b>contrat de capitalisation / CTO</b> (carte « 💼 Où investir ? »). ${rows.every((v) => v.margeAuj <= 0) ? "<b>Ici : marge nulle sur les deux parents.</b>" : ""}</p>`;
+        <p class="muted small" style="margin-top:8px">💡 Lecture : chaque enfant a aujourd'hui un capital AV qui, à ${perf} %/an, sera <b>×${facteur.toFixed(1)}</b> dans ${n} ans. S'il dépasse alors 852 500 €, la part au-dessus sera taxée à <b>31,25 %</b> → <b>ne verse plus en AV pour du long terme</b>, bascule sur <b>contrat de capitalisation / CTO</b> (carte « 💼 Où investir ? »). ${rows.every((v) => v.margeAuj <= 0) ? "<b>Ici : marge déjà nulle sur les deux parents.</b>" : ""}</p>`;
     };
     $("#avp_r").addEventListener("input", runPerf);
     $("#avp_n").addEventListener("input", runPerf);
