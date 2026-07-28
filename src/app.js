@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=97";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=97";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=97";
-import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules } from "./optim.js?v=97";
-import * as sync from "./sync.js?v=97";
-import { askAI } from "./ai.js?v=97";
+} from "./data.js?v=98";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=98";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=98";
+import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules } from "./optim.js?v=98";
+import * as sync from "./sync.js?v=98";
+import { askAI } from "./ai.js?v=98";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2316,28 +2316,37 @@ function renderOptimiseur() {
   if (avPAo.rows.length) {
     const SEUIL = 852500;
     const runPerf = () => {
-      const r = 1 + parseNum($("#avp_r").value) / 100;
+      const perf = parseNum($("#avp_r").value);
+      const r = 1 + perf / 100;
       const n = parseNum($("#avp_n").value);
       const facteur = Math.pow(r, n);
-      const perParent = {};
-      avPAo.rows.forEach((row) => {
-        (perParent[row.assure] ||= { brut: 0, actualise: 0, futur: 0 });
-        perParent[row.assure].brut += Math.max(0, SEUIL - row.capital);                 // marge naïve (aujourd'hui)
-        perParent[row.assure].actualise += Math.max(0, SEUIL / facteur - row.capital);   // ce qu'on peut placer AUJOURD'HUI
-        perParent[row.assure].futur += row.capital * facteur;                             // capital actuel projeté au décès
+      const plafondAuj = SEUIL / facteur; // plafond ramené à un versement d'aujourd'hui
+      // Regroupe les jambes PAR ENFANT et par assuré → montants PAR ENFANT (moyenne des jambes du parent)
+      const legsParParent = {};
+      avPAo.rows.forEach((row) => { (legsParParent[row.assure] ||= []).push(row.capital); });
+      const rows = Object.entries(legsParParent).map(([assure, caps]) => {
+        const nb = Math.max(1, caps.length);
+        const auj = caps.reduce((a, b) => a + b, 0) / nb;   // capital actuel PAR ENFANT (de ce parent)
+        const deces = auj * facteur;                        // projeté au décès PAR ENFANT
+        const margeAuj = Math.max(0, plafondAuj - auj);     // ce qu'on peut ajouter AUJOURD'HUI par enfant
+        return { assure, auj, deces, margeAuj, depasse: deces > SEUIL };
       });
-      const rows = Object.entries(perParent).map(([assure, v]) => ({ assure, ...v }));
       $("#avp_result").innerHTML = `
-        <div class="table-wrap" style="margin-top:10px"><table class="grid2">
-          <thead><tr><th>Parent-assuré</th><th>Marge « naïve » (852 500 − actuel)</th><th>Capital actuel projeté au décès</th><th>Marge RÉELLE à placer aujourd'hui</th></tr></thead>
+        <div class="optim-verdict" style="margin:10px 0;border-left-color:${rows.some((v) => v.depasse) ? "var(--warn)" : "var(--accent-2)"}">
+          Avec <b>${perf} %/an sur ${n} ans</b>, tout capital est multiplié par <b>×${facteur.toFixed(1)}</b>.<br>
+          Donc le plafond à 20 % de 852 500 €/enfant <b>au décès</b> = seulement <b>${eur2(plafondAuj)}/enfant placé AUJOURD'HUI</b> (au-delà, la croissance te fait taper le 31,25 %).
+        </div>
+        <div class="table-wrap"><table class="grid2">
+          <thead><tr><th>Parent-assuré</th><th>AV actuelle / enfant</th><th>→ au décès (×${facteur.toFixed(1)})</th><th>vs plafond 852 500 €</th><th>Peut encore placer aujourd'hui /enfant</th></tr></thead>
           <tbody>${rows.map((v) => `<tr>
             <td><b>${v.assure}</b></td>
-            <td class="num muted">${eur2(v.brut)}</td>
-            <td class="num">${eur2(v.futur)}</td>
-            <td class="num ${v.actualise > 0 ? "net" : "droits"}"><b>${v.actualise > 0 ? eur2(v.actualise) : "0 € — déjà saturé au décès ⚠️"}</b></td>
+            <td class="num">${eur2(v.auj)}</td>
+            <td class="num">${eur2(v.deces)}</td>
+            <td class="num ${v.depasse ? "droits" : "net"}">${v.depasse ? `dépassé de ${eur2(v.deces - SEUIL)} → 31,25 %` : `sous le plafond`}</td>
+            <td class="num ${v.margeAuj > 0 ? "net" : "droits"}"><b>${v.margeAuj > 0 ? eur2(v.margeAuj) : "0 € ⚠️"}</b></td>
           </tr>`).join("")}</tbody>
         </table></div>
-        <p class="muted small" style="margin-top:8px">💡 Colonne clé : <b>« Marge réelle à placer aujourd'hui »</b> = <b>852 500 ÷ (1+perf)^années − capital actuel</b>, par enfant. Si ton AV actuelle projetée au décès dépasse déjà 852 500 € par enfant, la marge tombe à <b>0</b> (voire tu es déjà dans le 31,25 %) → mieux vaut basculer les nouveaux versements sur <b>contrat de capitalisation / CTO</b> (voir « Où investir ? »). Sur ${n} ans à ${parseNum($("#avp_r").value)} %, un capital est multiplié par <b>×${facteur.toFixed(2)}</b>.</p>`;
+        <p class="muted small" style="margin-top:8px">💡 Lecture : ton AV actuelle par enfant <b>grossit ×${facteur.toFixed(1)}</b> d'ici le décès. Si elle dépasse alors 852 500 €, tu es <b>déjà dans le 31,25 %</b> sans rien ajouter → <b>ne verse plus en AV</b>, mets les nouveaux placements longs sur <b>contrat de capitalisation / CTO</b> (carte « 💼 Où investir ? »). ${rows.every((v) => v.margeAuj <= 0) ? "<b>Ici : marge nulle sur les deux parents.</b>" : ""}</p>`;
     };
     $("#avp_r").addEventListener("input", runPerf);
     $("#avp_n").addEventListener("input", runPerf);
