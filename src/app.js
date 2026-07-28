@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=96";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=96";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=96";
-import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules } from "./optim.js?v=96";
-import * as sync from "./sync.js?v=96";
-import { askAI } from "./ai.js?v=96";
+} from "./data.js?v=97";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=97";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=97";
+import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules } from "./optim.js?v=97";
+import * as sync from "./sync.js?v=97";
+import { askAI } from "./ai.js?v=97";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2297,7 +2297,52 @@ function renderOptimiseur() {
       <div id="k_result"></div>
     </div>` : "";
 
-  c.innerHTML = cockpit + checklistCard + avCard + vehiculeCard + dememCard + capiCard + timingCard;
+  // --- Marge AV RÉELLE en tenant compte de la performance future (le plafond 852 500 €
+  // s'apprécie sur le capital transmis au DÉCÈS = primes + gains).
+  const avPerfCard = avPAo.rows.length ? `
+    <div class="card">
+      <h2>🔮 Marge AV réelle — la performance compte <span class="muted small">le plafond 852 500 € porte sur le capital au décès (primes + gains)</span></h2>
+      <p class="muted small">Ton assurance-vie actuelle va <b>grossir jusqu'au décès</b> et « manger » une partie du plafond. La vraie marge à placer <b>aujourd'hui</b> est donc plus petite que le simple « 852 500 − capital actuel ».</p>
+      <div class="form-row">
+        <label>Performance attendue (%/an)<input type="number" id="avp_r" value="3" min="0" max="10" step="0.5"></label>
+        <label>Années avant transmission<input type="number" id="avp_n" value="${Math.max(0, espDefaut - ageParentDefaut)}" min="0" max="60"></label>
+      </div>
+      <div id="avp_result"></div>
+    </div>` : "";
+
+  c.innerHTML = cockpit + checklistCard + avCard + avPerfCard + vehiculeCard + dememCard + capiCard + timingCard;
+
+  // --- Interaction marge AV actualisée par la performance
+  if (avPAo.rows.length) {
+    const SEUIL = 852500;
+    const runPerf = () => {
+      const r = 1 + parseNum($("#avp_r").value) / 100;
+      const n = parseNum($("#avp_n").value);
+      const facteur = Math.pow(r, n);
+      const perParent = {};
+      avPAo.rows.forEach((row) => {
+        (perParent[row.assure] ||= { brut: 0, actualise: 0, futur: 0 });
+        perParent[row.assure].brut += Math.max(0, SEUIL - row.capital);                 // marge naïve (aujourd'hui)
+        perParent[row.assure].actualise += Math.max(0, SEUIL / facteur - row.capital);   // ce qu'on peut placer AUJOURD'HUI
+        perParent[row.assure].futur += row.capital * facteur;                             // capital actuel projeté au décès
+      });
+      const rows = Object.entries(perParent).map(([assure, v]) => ({ assure, ...v }));
+      $("#avp_result").innerHTML = `
+        <div class="table-wrap" style="margin-top:10px"><table class="grid2">
+          <thead><tr><th>Parent-assuré</th><th>Marge « naïve » (852 500 − actuel)</th><th>Capital actuel projeté au décès</th><th>Marge RÉELLE à placer aujourd'hui</th></tr></thead>
+          <tbody>${rows.map((v) => `<tr>
+            <td><b>${v.assure}</b></td>
+            <td class="num muted">${eur2(v.brut)}</td>
+            <td class="num">${eur2(v.futur)}</td>
+            <td class="num ${v.actualise > 0 ? "net" : "droits"}"><b>${v.actualise > 0 ? eur2(v.actualise) : "0 € — déjà saturé au décès ⚠️"}</b></td>
+          </tr>`).join("")}</tbody>
+        </table></div>
+        <p class="muted small" style="margin-top:8px">💡 Colonne clé : <b>« Marge réelle à placer aujourd'hui »</b> = <b>852 500 ÷ (1+perf)^années − capital actuel</b>, par enfant. Si ton AV actuelle projetée au décès dépasse déjà 852 500 € par enfant, la marge tombe à <b>0</b> (voire tu es déjà dans le 31,25 %) → mieux vaut basculer les nouveaux versements sur <b>contrat de capitalisation / CTO</b> (voir « Où investir ? »). Sur ${n} ans à ${parseNum($("#avp_r").value)} %, un capital est multiplié par <b>×${facteur.toFixed(2)}</b>.</p>`;
+    };
+    $("#avp_r").addEventListener("input", runPerf);
+    $("#avp_n").addEventListener("input", runPerf);
+    runPerf();
+  }
 
   // --- Interaction comparateur d'enveloppes
   {
