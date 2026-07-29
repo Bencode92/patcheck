@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=104";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=104";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=104";
-import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=104";
-import * as sync from "./sync.js?v=104";
-import { askAI } from "./ai.js?v=104";
+} from "./data.js?v=105";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=105";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=105";
+import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=105";
+import * as sync from "./sync.js?v=105";
+import { askAI } from "./ai.js?v=105";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2009,9 +2009,14 @@ function renderRepartition() {
   const avPA = avParAssureEnfant(state);
   const actifs = state.actifs || [];
   const biensTransm = actifsTransmissiblesParents(state); // 🔓 transmissibles seulement
-  // On retire l'ENTREPRISE de la répartition égalitaire (gérée à part : Dutreil, gouvernance)
-  const biensRepartir = biensTransm.filter((b) => b.categorie !== "entreprise");
+  // Répartition égalitaire du VIVANT : seuls certains biens se donnent/démembrent en 1/n.
+  //  - OUI : immobilier, SCI (parts), contrat de capitalisation → donation démembrée possible.
+  //  - NON : PEA / PER / livrets / Article 83 (individuels → transmis AU DÉCÈS, pas partageables).
+  //  - Entreprise : gérée à part (Dutreil, gouvernance).
+  const PARTAGEABLES = new Set(["immobilier", "sci", "capitalisation"]);
+  const biensRepartir = biensTransm.filter((b) => PARTAGEABLES.has(b.categorie));
   const entrepriseAPart = biensTransm.filter((b) => b.categorie === "entreprise");
+  const placementsIndiv = biensTransm.filter((b) => !PARTAGEABLES.has(b.categorie) && b.categorie !== "entreprise"); // titres, liquidités…
 
   // ---- ① Vue d'ensemble : patrimoine par catégorie (net) ----
   const CATLBL = { immobilier: "🏠 Immobilier", sci: "🏢 SCI", entreprise: "🏭 Entreprise", titres: "📈 Titres / placements", liquidites: "💶 Liquidités", capitalisation: "🏦 Contrat de capitalisation", autre: "Autre" };
@@ -2108,12 +2113,12 @@ function renderRepartition() {
   // ---- ③bis Répartition ÉGALITAIRE des biens (chacun 1/n de CHAQUE bien) ----
   const totalBiensRepartir = biensRepartir.reduce((s, b) => s + b.valeurNette, 0);
   const partParEnfant = totalBiensRepartir / nbEnfants;
-  const biensEgalitaire = biensRepartir.length ? `
+  const biensEgalitaire = (biensRepartir.length || placementsIndiv.length) ? `
     <div class="card">
-      <div class="section-head"><div><h2>⚖️ Répartition égalitaire des biens</h2><div class="small muted">Pour éviter l'indivision subie (soulte, blocage, vente forcée), chaque bien est donné <b>à parts égales</b> aux ${nbEnfants} enfants : chacun ${nbEnfants === 3 ? "1/3" : "1/" + nbEnfants} de <b>chaque</b> bien, en nue-propriété. Personne ne « prend » un bien seul → pas de rachat de soulte.</div></div>
-        <span class="badge ok">entreprise exclue</span></div>
-      <div class="table-wrap"><table class="grid2">
-        <thead><tr><th>Bien (transmissible)</th><th>Valeur nette</th>${E.map((e) => `<th>${e.nom}</th>`).join("")}</tr></thead>
+      <div class="section-head"><div><h2>⚖️ Répartition égalitaire des biens</h2><div class="small muted">On ne coupe pas un bien en morceaux : chacun reçoit <b>1/${nbEnfants} des droits</b> (« ce bien est à nous ${nbEnfants} »). Seuls les biens <b>démembrables/donnables du vivant</b> figurent ici (immobilier, SCI, capitalisation).</div></div>
+        <span class="badge ok">entreprise + comptes individuels à part</span></div>
+      ${biensRepartir.length ? `<div class="table-wrap"><table class="grid2">
+        <thead><tr><th>Bien partageable du vivant</th><th>Valeur nette</th>${E.map((e) => `<th>${e.nom}</th>`).join("")}</tr></thead>
         <tbody>${biensRepartir.map((b) => `<tr>
           <td><b>${b.libelle}</b> <span class="muted small">· ${CATLBL[b.categorie] || b.categorie}</span></td>
           <td class="num">${eur2(b.valeurNette)}</td>
@@ -2121,8 +2126,13 @@ function renderRepartition() {
         </tr>`).join("")}</tbody>
         <tfoot><tr><td>Total par enfant</td><td class="num">${eur2(totalBiensRepartir)}</td>${E.map(() => `<td class="num net"><b>${eur2(partParEnfant)}</b></td>`).join("")}</tr></tfoot>
       </table></div>
-      ${entrepriseAPart.length ? `<p class="muted small" style="margin-top:8px">🏭 <b>Entreprise gérée à part</b> (${entrepriseAPart.map((e) => e.libelle).join(", ")}, ${eur2(entrepriseAPart.reduce((s, e) => s + e.valeurNette, 0))}) : transmission spécifique via <b>pacte Dutreil</b> et gouvernance dédiée — non incluse dans cette répartition égalitaire.</p>` : ""}
-      <p class="muted small" style="margin-top:6px">💡 Concrètement : une <b>donation-partage démembrée</b> de la nue-propriété de chaque bien (ou des parts de SCI) aux 3 enfants par parts égales. Chacun détient la même fraction de tout → équité parfaite et zéro indivision conflictuelle.</p>
+      <p class="muted small" style="margin-top:6px">💡 Concrètement : une <b>donation-partage démembrée</b> de la nue-propriété (ou des parts de SCI) aux ${nbEnfants} enfants par parts égales → chacun détient 1/${nbEnfants} de chaque bien, zéro indivision conflictuelle.</p>` : ""}
+      ${placementsIndiv.length ? `<div class="fiche" style="margin-top:12px">
+        <div class="row"><span class="k">⚠️ NON partageables du vivant — transmis AU DÉCÈS</span><span class="v"></span></div>
+        ${placementsIndiv.map((b) => `<div class="row sub"><span class="k">${b.libelle} <span class="muted small">· ${CATLBL[b.categorie] || b.categorie}</span></span><span class="v num">${eur2(b.valeurNette)}</span></div>`).join("")}
+      </div>
+      <p class="muted small" style="margin-top:6px">Un <b>PEA</b>, un <b>livret (LDD…)</b>, un <b>PER</b> ou un <b>Article 83</b> sont <b>individuels</b> : on ne peut pas en donner 1/${nbEnfants} de son vivant. Ils se transmettent <b>au décès</b> — le PEA/livret est clôturé et entre dans la succession (réparti ensuite), le PER/Article 83 va aux bénéficiaires de la <b>clause</b>. Un <b>CTO</b>, lui, peut être donné (donation de titres) — à basculer en catégorie adaptée si c'en est un.</p>` : ""}
+      ${entrepriseAPart.length ? `<p class="muted small" style="margin-top:8px">🏭 <b>Entreprise gérée à part</b> (${entrepriseAPart.map((e) => e.libelle).join(", ")}, ${eur2(entrepriseAPart.reduce((s, e) => s + e.valeurNette, 0))}) : transmission via <b>pacte Dutreil</b> + gouvernance dédiée.</p>` : ""}
     </div>` : "";
 
   // ---- ④ Plan de répartition « maintenant » (rappel actionnable) ----
