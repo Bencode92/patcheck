@@ -3,11 +3,11 @@
 //  Consomme debrief(state) + barèmes data.js. Zéro DOM.
 //  Tout est INDICATIF, à valider avec un notaire.
 // =============================================================
-import { debrief, avAvant70Effectif } from "./graph.js?v=100";
+import { debrief, avAvant70Effectif } from "./graph.js?v=101";
 import {
   ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70,
   BAREME_LIGNE_DIRECTE, calculDroits, tauxUsufruit,
-} from "./data.js?v=100";
+} from "./data.js?v=101";
 
 const PLAFOND_AV = AV_AVANT_70.abattement; // 152 500 € / bénéficiaire (990 I)
 
@@ -182,6 +182,31 @@ export function avParAssureEnfant(state, opts = {}) {
   const margeTotale = rows.reduce((s, r) => s + r.capaciteAvant3125, 0);
   const totalDroits = rows.reduce((s, r) => s + r.droits, 0);
   return { rows, parEnfant, seuil3125, plafond: PLAFOND_AV, totalAvGlobal, totalCouvert, apres70, versAutres, sansBeneficiaire, supposeEnfants, margeParAssure, margeTotale, totalDroits };
+}
+
+// « Succession SUBIE » — que se passe-t-il si les enfants héritent d'un bien immobilier
+// EN INDIVISION (sans anticipation) ? Chiffre la soulte pour qu'un enfant garde le bien,
+// le coût du financement, les frais de partage, ou la vente. But pédagogique : montrer
+// la douleur évitée par le démembrement/la SCI. Valeur = valeur NETTE du bien.
+export function simulerIndivision(valeur, p = {}) {
+  const n = Math.max(2, p.nbEnfants || 3);
+  const val = Math.max(0, Number(valeur) || 0);
+  const soulte = (val * (n - 1)) / n;                     // 1 enfant rachète les parts des (n−1) autres
+  const duree = p.dureeCredit || 20;
+  const taux = (p.tauxCredit != null ? p.tauxCredit : 3.4) / 100;
+  const rm = taux / 12, nm = duree * 12;
+  const mensualite = rm > 0 ? (soulte * rm) / (1 - Math.pow(1 + rm, -nm)) : soulte / nm;
+  const coutTotal = mensualite * nm;                      // total remboursé sur la durée
+  const interets = Math.max(0, coutTotal - soulte);
+  const fraisPartage = val * 0.037;                       // droit de partage 2,5 % + notaire + débours
+  const fraisVente = val * 0.04 + 500;                    // agence ~4 % + diagnostics
+  const netVente = Math.max(0, val - fraisVente);
+  const netVenteParEnfant = netVente / n;
+  const loyerAnnuel = p.loyerMensuel != null ? p.loyerMensuel * 12 : val * 0.03; // ~3 %/an brut par défaut
+  const rendementNetNet = val > 0 ? (loyerAnnuel * 0.32) / val : 0;              // ~0,32 du brut après charges + IR/PS
+  return { valeur: val, nbEnfants: n, soulte, mensualite, interets, coutTotal,
+    surcoutPct: soulte > 0 ? coutTotal / soulte - 1 : 0, fraisPartage, fraisVente,
+    netVente, netVenteParEnfant, rendementNetNet, loyerAnnuel };
 }
 
 // Comparateur d'ENVELOPPES pour un montant X à investir : où loger l'argent pour

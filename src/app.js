@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=100";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=100";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=100";
-import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules } from "./optim.js?v=100";
-import * as sync from "./sync.js?v=100";
-import { askAI } from "./ai.js?v=100";
+} from "./data.js?v=101";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=101";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=101";
+import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=101";
+import * as sync from "./sync.js?v=101";
+import { askAI } from "./ai.js?v=101";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2518,7 +2518,40 @@ function renderOptimiseur() {
             : " Ton abattement est déjà disponible : rien à gagner à attendre côté abattement."}
           ${r.frac < 1 ? ` Avec une fraction de ${pct(r.frac)}, il faudrait ~<b>${r.tranches.ops}</b> opération(s) espacées de 15 ans pour transmettre tout le bien en purgeant les abattements.` : ""}
         </div>
-        <p class="muted small" style="margin-top:6px">💡 Le démembrement ne taxe que la nue-propriété (fraction 669) et gèle la valeur transmise : la revalorisation future échappe aux droits. Le parent conserve les revenus et le contrôle via l'usufruit. À valider avec un notaire.</p>`;
+        <p class="muted small" style="margin-top:6px">💡 Le démembrement ne taxe que la nue-propriété (fraction 669) et gèle la valeur transmise : la revalorisation future échappe aux droits. Le parent conserve les revenus et le contrôle via l'usufruit. À valider avec un notaire.</p>
+        ${(() => {
+          // Panneau « subir vs anticiper » — pour les biens immobiliers / SCI
+          if (!["immobilier", "sci"].includes(bien.categorie)) return "";
+          const iv = simulerIndivision(bien.valeurNette, { nbEnfants });
+          const eur0 = (x) => Math.round(x).toLocaleString("fr-FR") + " €";
+          return `<div class="card" style="background:linear-gradient(180deg,#fff9f8,#fff);border:1px solid #f3d9d4;margin:14px 0 0">
+            <h3 style="margin:0 0 6px">🏠 Ce bien à ta succession — <span style="color:var(--warn)">subir</span> vs <span style="color:var(--accent-2)">anticiper</span></h3>
+            <p class="muted small" style="margin:0 0 10px">Pour <b>${bien.libelle}</b> (valeur nette ${eur0(iv.valeur)}, ${nbEnfants} enfants). Ce qui se passe si tu ne fais rien vs si tu démembres.</p>
+            <div class="cockpit" style="grid-template-columns:1fr 1fr;gap:12px">
+              <div class="kpi2 alert" style="text-align:left">
+                <div class="lbl" style="color:var(--danger)">❌ Si tu ne fais rien — indivision à ${nbEnfants}</div>
+                <ul class="small" style="margin:8px 0 0;padding-left:18px;line-height:1.55">
+                  <li>Pour qu'<b>un enfant garde</b> le bien, il rachète les parts des autres : <b>soulte ${eur0(iv.soulte)}</b>.</li>
+                  <li>Financé sur ${20} ans : <b>${eur0(iv.mensualite)}/mois</b>, soit <b>${eur0(iv.interets)} d'intérêts</b> (+${Math.round(iv.surcoutPct * 100)} % de surcoût).</li>
+                  <li>Ou <b>vente</b> : ${eur0(iv.netVenteParEnfant)} net par enfant (frais ${eur0(iv.fraisVente)}) — le bien sort de la famille.</li>
+                  <li><b>Blocage possible</b> : 2 enfants sur 3 (2/3) peuvent forcer la vente (loi 7 avril 2026).</li>
+                  <li>+ droit de partage & frais : <b>${eur0(iv.fraisPartage)}</b>. Rendement locatif réel ~<b>${(iv.rendementNetNet * 100).toFixed(1)} %</b> net-net.</li>
+                </ul>
+              </div>
+              <div class="kpi2 good" style="text-align:left">
+                <div class="lbl" style="color:var(--accent-2)">✅ Si tu anticipes — démembrement (ton plan)</div>
+                <ul class="small" style="margin:8px 0 0;padding-left:18px;line-height:1.55">
+                  <li>Nue-propriété <b>déjà donnée</b> → au décès, consolidation <b>sans droits</b> (art. 1133).</li>
+                  <li><b>Pas de soulte</b> à financer, <b>pas de partage</b> à 2,5 %, pas de licitation.</li>
+                  <li>Droits aujourd'hui : <b>${eur2(r.maintenant.droits)}</b> vs <b>${eur2(r.succession.droits)}</b> en succession → <b style="color:var(--accent-2)">−${eur2(Math.max(0, r.succession.droits - r.maintenant.droits))}</b>.</li>
+                  <li>Gouvernance (gérance, sortie des enfants) encadrée par les <b>statuts</b> ${bien.categorie === "sci" ? "de la SCI" : "(via une SCI)"}.</li>
+                  <li>Tu gardes l'<b>usufruit</b> : revenus + contrôle jusqu'au bout.</li>
+                </ul>
+              </div>
+            </div>
+            <p class="muted small" style="margin-top:10px">💡 Anticiper, ce n'est pas seulement <b>${eur2(Math.max(0, r.succession.droits - r.maintenant.droits))} de droits économisés</b> : c'est surtout éviter que tes enfants s'emprisonnent 20 ans dans une soulte ou se bloquent en indivision. C'est ça, le vrai gain.</p>
+          </div>`;
+        })()}`;
     };
     $("#o_go").addEventListener("click", run);
     run();
