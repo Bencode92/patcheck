@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=101";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=101";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=101";
-import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=101";
-import * as sync from "./sync.js?v=101";
-import { askAI } from "./ai.js?v=101";
+} from "./data.js?v=102";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=102";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=102";
+import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=102";
+import * as sync from "./sync.js?v=102";
+import { askAI } from "./ai.js?v=102";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -192,6 +192,7 @@ const TABS = [
   { id: "organigramme", label: "🏠 Résumé patrimonial" },
   { id: "conseil", label: "🤖 Conseil & optimisation" },
   { id: "optimiseur", label: "🎯 Optimiseur" },
+  { id: "repartition", label: "🌍 Patrimoine & répartition" },
   { id: "famille", label: "👪 Famille" },
   { id: "patrimoine", label: "🏦 Patrimoine" },
   { id: "entreprise", label: "🏭 Entreprise" },
@@ -226,6 +227,7 @@ function render() {
     organigramme: renderOrganigramme,
     conseil: renderConseil,
     optimiseur: renderOptimiseur,
+    repartition: renderRepartition,
     famille: renderFamille,
     patrimoine: renderPatrimoine,
     entreprise: renderEntreprise,
@@ -1997,6 +1999,134 @@ Sois concret et chiffré.`;
   $$("#tab-content .suggest").forEach((b) => b.addEventListener("click", () => send(b.textContent)));
 }
 
+// ---------- Onglet Patrimoine global & répartition ----------
+function renderRepartition() {
+  const c = $("#tab-content");
+  const d = debrief(state);
+  const eur2 = (n) => Math.round(n || 0).toLocaleString("fr-FR") + " €";
+  const E = enfants();
+  const nbEnfants = Math.max(1, E.length);
+  const avPA = avParAssureEnfant(state);
+  const actifs = state.actifs || [];
+  const biensTransm = actifsTransmissiblesParents(state); // 🔓 transmissibles seulement
+
+  // ---- ① Vue d'ensemble : patrimoine par catégorie (net) ----
+  const CATLBL = { immobilier: "🏠 Immobilier", sci: "🏢 SCI", entreprise: "🏭 Entreprise", titres: "📈 Titres / placements", liquidites: "💶 Liquidités", capitalisation: "🏦 Contrat de capitalisation", autre: "Autre" };
+  const avTotal = (d.avAvant70 || 0) + (d.avApres70 || 0);
+  const parCat = { ...(d.parCategorie || {}) };
+  const catRows = Object.entries(parCat).filter(([, v]) => v > 0.5).sort((a, b) => b[1] - a[1]);
+  const totalBiens = d.patrimoineFoyer || 0;
+  // À garder vs transmissible (sur les biens détenus PP par parents)
+  const idsTransm = new Set(biensTransm.map((b) => b.id));
+  let valGarder = 0, valTransm = 0;
+  actifs.forEach((a) => {
+    if (a.aGarder) { /* estimé via debrief net non trivial ; approx par valeur */ valGarder += Number(a.valeur) || 0; }
+  });
+  biensTransm.forEach((b) => (valTransm += b.valeurNette));
+
+  const vueEnsemble = `
+    <div class="card">
+      <h2>🌍 Patrimoine global</h2>
+      <div class="cockpit" style="grid-template-columns:repeat(3,1fr)">
+        <div class="kpi2"><div class="lbl">Patrimoine net (biens + AV)</div><div class="val num">${eur2(totalBiens + avTotal)}</div><div class="sub">biens ${eur2(totalBiens)} + AV ${eur2(avTotal)}</div></div>
+        <div class="kpi2 good"><div class="lbl">🔓 Transmissible (biens PP parents)</div><div class="val num">${eur2(valTransm)}</div><div class="sub">entre dans la répartition</div></div>
+        <div class="kpi2 alert"><div class="lbl">🔒 À garder (exclu)</div><div class="val num">${eur2(valGarder)}</div><div class="sub">marqué « à garder » dans Patrimoine</div></div>
+      </div>
+      <div class="table-wrap" style="margin-top:12px"><table class="grid2">
+        <thead><tr><th>Catégorie</th><th>Valeur nette détenue</th><th>Part</th></tr></thead>
+        <tbody>
+          ${catRows.map(([k, v]) => `<tr><td>${CATLBL[k] || k}</td><td class="num">${eur2(v)}</td><td class="num muted">${totalBiens > 0 ? Math.round(v / totalBiens * 100) : 0} %</td></tr>`).join("")}
+          ${avTotal > 0 ? `<tr><td>🛡️ Assurance-vie</td><td class="num">${eur2(avTotal)}</td><td class="num muted">—</td></tr>` : ""}
+        </tbody>
+      </table></div>
+    </div>`;
+
+  // ---- ② Répartition par enfant : ce que chacun reçoit AU FINAL (net) ----
+  // Succession nette (part égale de l'assiette transmise, après droits) + AV nette.
+  const succNetParEnfant = {};
+  (d.successionParEnfant || []).forEach((x) => (succNetParEnfant[x.nom] = x.net));
+  const avNetParEnfant = {};
+  (avPA.parEnfant || []).forEach((e) => (avNetParEnfant[e.nom] = e.capital - e.droits));
+  const recap = E.map((e) => {
+    const succ = succNetParEnfant[e.nom] || 0;
+    const av = avNetParEnfant[e.nom] || 0;
+    return { nom: e.nom, succ, av, total: succ + av };
+  });
+  const totalRecu = recap.reduce((s, r) => s + r.total, 0);
+  const moyenne = recap.length ? totalRecu / recap.length : 0;
+  const maxT = Math.max(1, ...recap.map((r) => r.total));
+  const ecart = recap.length ? Math.max(...recap.map((r) => r.total)) - Math.min(...recap.map((r) => r.total)) : 0;
+  const ratioEcart = moyenne > 0 ? ecart / moyenne : 0;
+
+  const repartEnfant = recap.length ? `
+    <div class="card">
+      <div class="section-head"><div><h2>👨‍👩‍👧‍👦 Ce que reçoit réellement chaque enfant</h2><div class="small muted">Net perçu = succession (après droits) + assurance-vie (après 990 I). C'est ce total qui compte pour juger de l'équité.</div></div>
+        <span class="badge ${ratioEcart < 0.05 ? "ok" : "warn"}">${ratioEcart < 0.05 ? "Équilibré" : "Déséquilibre " + Math.round(ratioEcart * 100) + " %"}</span></div>
+      <div class="table-wrap"><table class="grid2">
+        <thead><tr><th>Enfant</th><th>Succession (net)</th><th>Assurance-vie (net)</th><th>TOTAL net</th><th>Part</th><th></th></tr></thead>
+        <tbody>${recap.map((r) => `<tr>
+          <td><b>${r.nom}</b></td>
+          <td class="num">${eur2(r.succ)}</td>
+          <td class="num">${eur2(r.av)}</td>
+          <td class="num net"><b>${eur2(r.total)}</b></td>
+          <td class="num">${totalRecu > 0 ? Math.round(r.total / totalRecu * 100) : 0} %</td>
+          <td style="min-width:90px"><span class="track" style="display:inline-block;width:80px;height:8px;background:#eef2f7;border-radius:4px;overflow:hidden;vertical-align:middle"><span style="display:block;height:100%;width:${Math.round(r.total / maxT * 100)}%;background:${r.total === Math.max(...recap.map((x) => x.total)) && ratioEcart >= 0.05 ? "var(--warn)" : "var(--accent-2)"}"></span></span></td>
+        </tr>`).join("")}</tbody>
+        <tfoot><tr><td>Total</td><td class="num">${eur2(recap.reduce((s, r) => s + r.succ, 0))}</td><td class="num">${eur2(recap.reduce((s, r) => s + r.av, 0))}</td><td class="num net"><b>${eur2(totalRecu)}</b></td><td class="num">100 %</td><td></td></tr></tfoot>
+      </table></div>
+      ${ratioEcart >= 0.05 ? `<div class="optim-verdict" style="margin-top:10px">⚠️ Écart de <b>${eur2(ecart)}</b> entre le plus et le moins servi — souvent dû à l'assurance-vie (quasi-exonérée). Pour rééquilibrer : réoriente une part d'AV vers l'enfant le moins servi, ou compense par une donation.</div>` : `<div class="optim-verdict" style="margin-top:10px">✅ Répartition équilibrée entre tes ${nbEnfants} enfants.</div>`}
+    </div>` : "";
+
+  // ---- ③ Répartition cible — égalitaire par défaut, personnalisable ----
+  state.repartitionPoids ||= {};
+  E.forEach((e) => { if (state.repartitionPoids[e.id] == null) state.repartitionPoids[e.id] = 1; });
+  const poidsTot = E.reduce((s, e) => s + (Number(state.repartitionPoids[e.id]) || 0), 0) || 1;
+  const cible = `
+    <div class="card">
+      <div class="section-head"><div><h2>🎯 Répartition cible</h2><div class="small muted">Par défaut <b>égalitaire</b> (chaque enfant 1 part). Ajuste les curseurs pour personnaliser (donner plus à l'un). La cible = base transmissible × sa part.</div></div>
+        <button id="rep_reset" class="btn ghost small">↺ Remettre égalitaire</button></div>
+      <div class="cockpit" style="grid-template-columns:repeat(${Math.min(3, nbEnfants)},1fr)">
+        ${E.map((e) => {
+          const poids = Number(state.repartitionPoids[e.id]) || 0;
+          const pct = poids / poidsTot;
+          const cibleE = (totalRecu || (valTransm + avTotal)) * pct;
+          const actuel = (recap.find((r) => r.nom === e.nom) || {}).total || 0;
+          const gap = actuel - cibleE;
+          return `<div class="kpi2">
+            <div class="lbl">${e.nom} — ${(pct * 100).toFixed(0)} %</div>
+            <input type="range" class="rep_slider" data-id="${e.id}" min="0" max="5" step="0.5" value="${poids}" style="width:100%;margin:6px 0">
+            <div class="sub">Cible ${eur2(cibleE)}${Math.abs(gap) > totalRecu * 0.02 ? ` · <span style="color:${gap < 0 ? "var(--warn)" : "var(--accent-2)"}">${gap < 0 ? "manque " + eur2(-gap) : "+" + eur2(gap)}</span>` : " · ✅ atteint"}</div>
+          </div>`;
+        }).join("")}
+      </div>
+      <p class="muted small" style="margin-top:10px">💡 La <b>cible</b> répartit la base transmissible selon les parts choisies. L'écart « manque/+ » compare à ce que l'enfant reçoit réellement aujourd'hui (colonne TOTAL ci-dessus) → dis-toi combien ajuster via AV ou donation pour atteindre ta cible.</p>
+    </div>`;
+
+  // ---- ④ Plan de répartition « maintenant » (rappel actionnable) ----
+  const plan = `
+    <div class="card">
+      <h2>📋 Comment répartir maintenant</h2>
+      <div class="reco-list">
+        <div class="reco reco-action"><span class="reco-ico">1</span><span><b>Démembrer les biens transmissibles</b> (donner la nue-propriété aux ${nbEnfants} enfants à parts égales, garder l'usufruit) — voir l'onglet 🎯 Optimiseur pour le chiffrage bien par bien.</span></div>
+        <div class="reco reco-action"><span class="reco-ico">2</span><span><b>Assurance-vie : enfants désignés directs</b>, répartis également, dans la limite du palier 20 % (852 500 € par parent-assuré et par enfant).</span></div>
+        <div class="reco reco-action"><span class="reco-ico">3</span><span><b>Surplus / nouveaux placements longs</b> → contrat de capitalisation démembré ou CTO (au-delà des plafonds AV).</span></div>
+        <div class="reco reco-action"><span class="reco-ico">4</span><span><b>Donations en franchise</b> : ${d.capaciteExoneree > 0 ? `${eur2(d.capaciteExoneree)} disponibles dès maintenant` : `épuisées — rouvrir dans ~${horizonRechargePleine(state)} an(s)`}, à répartir également.</span></div>
+      </div>
+      <p class="muted small" style="margin-top:8px">Chaque levier se règle finement dans l'onglet 🎯 Optimiseur. Ici, c'est la vue d'ensemble de la répartition.</p>
+    </div>`;
+
+  c.innerHTML = vueEnsemble + repartEnfant + cible + plan;
+
+  // Interactions curseurs
+  $$("#tab-content .rep_slider").forEach((el) => el.addEventListener("input", (e2) => {
+    state.repartitionPoids[e2.target.dataset.id] = Number(e2.target.value);
+    save();
+    renderRepartition();
+  }));
+  const reset = $("#rep_reset");
+  if (reset) reset.addEventListener("click", () => { E.forEach((e) => (state.repartitionPoids[e.id] = 1)); save(); renderRepartition(); });
+}
+
 // ---------- Onglet Optimiseur (moteur d'aide à la décision) ----------
 function renderOptimiseur() {
   const c = $("#tab-content");
@@ -2649,6 +2779,19 @@ function renderBaremes() {
           <tr><td>Taux au-delà</td><td>${pct(AV_AVANT_70.tauxTranche2)}</td></tr>
           <tr><td>Abattement global (après 70 ans, 757 B)</td><td>${eur(AV_APRES_70.abattementGlobal)}</td></tr>
         </tbody></table>
+      </div>
+      <div class="card">
+        <h3>🎁 Donations — règles spécifiques</h3>
+        <table class="grid"><tbody>
+          <tr><td>Barème des droits</td><td>Identique aux successions (ligne directe ci-contre)</td></tr>
+          <tr><td>Abattement parent → enfant</td><td>${eur(ABATTEMENTS.enfant)} /parent /enfant</td></tr>
+          <tr><td>Rappel fiscal (renouvellement)</td><td>tous les ${DELAI_RAPPEL_ANS} ans</td></tr>
+          <tr><td>Don familial de somme (790 G)</td><td>${eur(DON_FAMILIAL_SOMME)} <b>en plus</b> de l'abattement</td></tr>
+          <tr><td>— condition 790 G</td><td>donateur &lt; 80 ans + bénéficiaire majeur</td></tr>
+          <tr><td>Donation démembrée (669)</td><td>base taxée = nue-propriété (selon âge)</td></tr>
+          <tr><td>Réduction Dutreil (790 CGI)</td><td>−50 % des droits (donation PP de titres avec pacte, donateur &lt; 70 ans)</td></tr>
+        </tbody></table>
+        <p class="muted small" style="margin-top:6px">💡 L'abattement 100 000 € et le don familial 790 G se cumulent et se rechargent tous les 15 ans : une donation optimisée les combine.</p>
       </div>
     </div>
     <p class="muted small center">⚠️ Barèmes indicatifs 2026 — à vérifier avec ton notaire / la loi de finances en vigueur.</p>`;
