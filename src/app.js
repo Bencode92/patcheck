@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=105";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=105";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=105";
-import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=105";
-import * as sync from "./sync.js?v=105";
-import { askAI } from "./ai.js?v=105";
+} from "./data.js?v=106";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=106";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=106";
+import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=106";
+import * as sync from "./sync.js?v=106";
+import { askAI } from "./ai.js?v=106";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2135,6 +2135,48 @@ function renderRepartition() {
       ${entrepriseAPart.length ? `<p class="muted small" style="margin-top:8px">🏭 <b>Entreprise gérée à part</b> (${entrepriseAPart.map((e) => e.libelle).join(", ")}, ${eur2(entrepriseAPart.reduce((s, e) => s + e.valeurNette, 0))}) : transmission via <b>pacte Dutreil</b> + gouvernance dédiée.</p>` : ""}
     </div>` : "";
 
+  // ---- ③ter Allotissement : lots par préférence, égalitaires en VALEUR ----
+  state.lots ||= {};
+  const lotParEnfant = {}; E.forEach((e) => (lotParEnfant[e.id] = 0));
+  let indivisVal = 0;
+  biensTransm.forEach((b) => {
+    const a = state.lots[b.id];
+    if (a && lotParEnfant[a] != null) lotParEnfant[a] += b.valeurNette;
+    else { E.forEach((e) => (lotParEnfant[e.id] += b.valeurNette / nbEnfants)); indivisVal += b.valeurNette; }
+  });
+  const totalLots = Object.values(lotParEnfant).reduce((s, v) => s + v, 0);
+  const cibleLot = nbEnfants ? totalLots / nbEnfants : 0;
+  const allot = biensTransm.length ? `
+    <div class="card">
+      <div class="section-head"><div><h2>🎁 Allotissement par préférence — lots égalitaires en valeur</h2><div class="small muted">Attribue chaque bien <b>entier</b> à un enfant (selon ses préférences). L'app vérifie que les lots sont <b>équilibrés en valeur</b> et calcule la <b>soulte</b> pour égaliser. Chacun est <b>seul propriétaire de son lot</b> → zéro indivision.</div></div></div>
+      <div class="table-wrap"><table class="grid2">
+        <thead><tr><th>Bien</th><th>Valeur nette</th><th>Attribué à</th></tr></thead>
+        <tbody>${biensTransm.map((b) => `<tr>
+          <td><b>${b.libelle}</b> <span class="muted small">· ${CATLBL[b.categorie] || b.categorie}</span></td>
+          <td class="num">${eur2(b.valeurNette)}</td>
+          <td><select class="lot_sel" data-id="${b.id}" style="min-width:130px">
+            <option value="" ${!state.lots[b.id] ? "selected" : ""}>— indivis (1/${nbEnfants})</option>
+            ${E.map((e) => `<option value="${e.id}" ${state.lots[b.id] === e.id ? "selected" : ""}>${e.nom}</option>`).join("")}
+          </select></td>
+        </tr>`).join("")}</tbody>
+      </table></div>
+      <h3 style="margin:14px 0 6px">Équilibre des lots (cible ${eur2(cibleLot)}/enfant)</h3>
+      <div class="cockpit" style="grid-template-columns:repeat(${Math.min(3, nbEnfants)},1fr)">
+        ${E.map((e) => {
+          const lot = lotParEnfant[e.id] || 0;
+          const ecart = lot - cibleLot;
+          const ok = Math.abs(ecart) < totalLots * 0.02;
+          return `<div class="kpi2 ${ok ? "good" : ""}">
+            <div class="lbl">${e.nom} — son lot</div>
+            <div class="val num">${eur2(lot)}</div>
+            <div class="sub">${ok ? "✅ équilibré" : ecart > 0 ? `<span style="color:var(--warn)">reçoit ${eur2(ecart)} de trop → verse une soulte</span>` : `<span style="color:var(--accent-2)">reçoit ${eur2(-ecart)} de moins → reçoit une soulte</span>`}</div>
+          </div>`;
+        }).join("")}
+      </div>
+      ${indivisVal > 0 ? `<p class="muted small" style="margin-top:8px">${eur2(indivisVal)} encore <b>en indivis</b> (biens non attribués, répartis 1/${nbEnfants}). Attribue-les pour supprimer toute indivision.</p>` : `<p class="muted small" style="margin-top:8px">✅ Tous les biens sont attribués — aucune indivision. Ajuste avec des soultes pour parfaire l'égalité en valeur.</p>`}
+      <p class="muted small">💡 En pratique : <b>donation-partage</b> avec des lots de valeur égale. Un enfant qui reçoit un peu plus verse une <b>soulte</b> aux autres — l'égalité est en <b>valeur</b>, pas en nature. Les comptes individuels (PEA, PER…) rejoignent naturellement un lot (transmis au décès à ce bénéficiaire).</p>
+    </div>` : "";
+
   // ---- ④ Plan de répartition « maintenant » (rappel actionnable) ----
   const plan = `
     <div class="card">
@@ -2148,7 +2190,7 @@ function renderRepartition() {
       <p class="muted small" style="margin-top:8px">Chaque levier se règle finement dans l'onglet 🎯 Optimiseur. Ici, c'est la vue d'ensemble de la répartition.</p>
     </div>`;
 
-  c.innerHTML = vueEnsemble + repartEnfant + cible + biensEgalitaire + plan;
+  c.innerHTML = vueEnsemble + repartEnfant + cible + biensEgalitaire + allot + plan;
 
   // Interactions curseurs
   $$("#tab-content .rep_slider").forEach((el) => el.addEventListener("input", (e2) => {
@@ -2158,6 +2200,14 @@ function renderRepartition() {
   }));
   const reset = $("#rep_reset");
   if (reset) reset.addEventListener("click", () => { E.forEach((e) => (state.repartitionPoids[e.id] = 1)); save(); renderRepartition(); });
+  // Attribution des lots (allotissement)
+  $$("#tab-content .lot_sel").forEach((el) => el.addEventListener("change", (e2) => {
+    state.lots ||= {};
+    if (e2.target.value) state.lots[e2.target.dataset.id] = e2.target.value;
+    else delete state.lots[e2.target.dataset.id];
+    save();
+    renderRepartition();
+  }));
 }
 
 // ---------- Onglet Optimiseur (moteur d'aide à la décision) ----------
