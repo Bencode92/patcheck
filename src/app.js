@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=102";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=102";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=102";
-import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=102";
-import * as sync from "./sync.js?v=102";
-import { askAI } from "./ai.js?v=102";
+} from "./data.js?v=103";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=103";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=103";
+import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=103";
+import * as sync from "./sync.js?v=103";
+import { askAI } from "./ai.js?v=103";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2792,6 +2792,18 @@ function renderBaremes() {
           <tr><td>Réduction Dutreil (790 CGI)</td><td>−50 % des droits (donation PP de titres avec pacte, donateur &lt; 70 ans)</td></tr>
         </tbody></table>
         <p class="muted small" style="margin-top:6px">💡 L'abattement 100 000 € et le don familial 790 G se cumulent et se rechargent tous les 15 ans : une donation optimisée les combine.</p>
+      </div>
+      <div class="card">
+        <h3>💶 Donation à un enfant — droits APRÈS l'abattement de 100 000 €</h3>
+        <p class="muted small">Ce qu'il faut payer selon le montant donné à <b>un</b> enfant par <b>un</b> parent (barème ligne directe sur la part qui dépasse 100 000 €).</p>
+        <table class="grid"><thead><tr><th>Montant donné</th><th>Part taxable (après 100 000 €)</th><th>Droits à payer</th><th>Taux effectif</th></tr></thead><tbody>
+          ${[100000, 150000, 200000, 300000, 500000, 800000, 1100000].map((montant) => {
+            const taxable = Math.max(0, montant - ABATTEMENTS.enfant);
+            const droits = calculDroits(taxable, BAREME_LIGNE_DIRECTE);
+            return `<tr><td>${eur(montant)}</td><td class="num">${eur(taxable)}</td><td class="num">${eur(droits)}</td><td class="num muted">${montant > 0 ? (droits / montant * 100).toFixed(1) : 0} %</td></tr>`;
+          }).join("")}
+        </tbody></table>
+        <p class="muted small" style="margin-top:6px">Par <b>couple</b> de parents, double l'abattement (200 000 €) → chaque tranche taxable démarre plus haut. En démembrement, la base taxée = seulement la nue-propriété (barème 669).</p>
       </div>
     </div>
     <p class="muted small center">⚠️ Barèmes indicatifs 2026 — à vérifier avec ton notaire / la loi de finances en vigueur.</p>`;
