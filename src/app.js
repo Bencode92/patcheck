@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=106";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=106";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=106";
-import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=106";
-import * as sync from "./sync.js?v=106";
-import { askAI } from "./ai.js?v=106";
+} from "./data.js?v=107";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=107";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=107";
+import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=107";
+import * as sync from "./sync.js?v=107";
+import { askAI } from "./ai.js?v=107";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1070,6 +1070,23 @@ function renderPatrimoine() {
     return bits.join(" · ");
   };
 
+  // Cohérence des parts : PP + US = 100 % ET PP + NP = 100 % (sinon double compte :
+  // ex. parents laissés à 100 % PP alors que les enfants ont reçu la NP).
+  const coherenceParts = (a) => {
+    const dets = detenteursDe(a.id);
+    if (!dets.length) return "";
+    const tot = (dr) => dets.filter((o) => o.d.droit === dr).reduce((s, o) => s + (Number(o.d.part) || 0), 0);
+    const pp = tot("PP"), us = tot("US"), np = tot("NP");
+    const r = (x) => Math.round(x * 100) / 100;
+    const warn = (m) => `<div class="small" style="color:var(--warn);margin-top:6px">⚠️ ${m}</div>`;
+    if (!us && !np) return r(pp) !== 100 ? warn(`Les parts en pleine propriété totalisent ${r(pp)} % (attendu 100 %).`) : "";
+    const out = [];
+    if (r(pp + us) !== 100) out.push(`PP + usufruit = ${r(pp + us)} % (attendu 100 %)`);
+    if (r(pp + np) !== 100) out.push(`PP + nue-propriété = ${r(pp + np)} % (attendu 100 %)`);
+    if (out.length) return warn(`Démembrement incohérent : ${out.join(" · ")}. Si les parents gardent l'usufruit, leur ligne doit passer de <b>PP</b> à <b>US</b> (pas rester en PP), sinon le bien est compté deux fois et leur succession ne baisse pas.`);
+    return a.demembrementAnnee ? "" : warn(`Renseigne l'<b>année du démembrement</b> ci-dessous : sans elle, le barème 669 prend l'âge <b>actuel</b> de l'usufruitier.`);
+  };
+
   const assetCard = (a, ai) => `
     <div class="asset-card">
       <div class="asset-head">
@@ -1097,6 +1114,7 @@ function renderPatrimoine() {
             <button class="danger-link" data-del="detention" data-di="${i}">✕</button>
           </div>`).join("") || `<div class="muted small">Aucun détenteur pour l'instant.</div>`}
         <button class="btn small" data-add="detenteur" data-ai="${ai}">+ détenteur</button>
+        ${coherenceParts(a)}
         ${detenteursDe(a.id).some((o) => o.d.droit !== "PP") ? `<label class="muted small" style="display:flex;gap:6px;align-items:center;margin-top:8px">Année du démembrement (fige le barème 669) <input class="f_demyr" data-ai="${ai}" type="number" min="1990" max="${yr}" placeholder="ex : 2025" value="${a.demembrementAnnee ?? ""}" style="max-width:110px"></label>` : ""}
       </div>
 
@@ -1241,12 +1259,13 @@ function renderPatrimoine() {
       const a = A[+t.dataset.ai];
       if (t.classList.contains("f_cat")) { a.categorie = t.value; save(); renderPatrimoine(); }
       else if (t.classList.contains("f_dut")) { a.dutreil = t.checked; save(); }
+      else if (t.classList.contains("f_demyr")) renderPatrimoine(); // retire l'alerte « année manquante »
     } else if (t.dataset.di != null) {
       const d = D[+t.dataset.di];
       if (t.classList.contains("dd_prop")) d.proprietaire = t.value;
       else if (t.classList.contains("dd_droit")) d.droit = t.value;
-      else return;
-      save();
+      else if (!t.classList.contains("dd_part")) return;
+      save(); renderPatrimoine(); // ré-affiche : champ année démembrement + contrôle des parts
     }
   };
 }
