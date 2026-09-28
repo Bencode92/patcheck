@@ -1,7 +1,7 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=107";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=108";
 
 // Année de naissance : la DATE complète prime (plus précise), puis année seule, puis âge
 function birthYear(p) {
@@ -175,6 +175,8 @@ export function debrief(state) {
   const parPersonneDetail = {};
   personnes.forEach((p) => { parPersonne[p.id] = 0; parPersonneDetail[p.id] = []; });
   let patrimoineFoyer = 0;
+  const nomDe = (id) => (personnes.find((p) => p.id === id) || {}).nom || id;
+  const foyerLignes = []; // détail « Patrimoine net des biens » (bien par bien)
   detentions.forEach((d) => {
     if (!estPersonne(d.proprietaire)) return; // détenu par une SCI -> ignoré au niveau foyer
     const a = actif(d.actifRef);
@@ -182,12 +184,14 @@ export function debrief(state) {
     const val = valeurEconomique(d); // US/NP valorisés au barème 669
     parPersonne[d.proprietaire] += val;
     patrimoineFoyer += val;
+    foyerLignes.push({ libelle: a.libelle || a.id, categorie: a.categorie, nom: nomDe(d.proprietaire), part: Number(d.part) || 0, droit: d.droit, fraction: fractionDroit(d), valeurBien: actifNet(d.actifRef), valeur: val });
     parPersonneDetail[d.proprietaire].push({ libelle: a.libelle || a.id, categorie: a.categorie, part: d.part, droit: d.droit, valeur: val, fraction: fractionDroit(d), usuAge: usuAge(d.actifRef) });
   });
   // Dettes personnelles
   Object.entries(detteParPersonne).forEach(([pid, m]) => {
     if (parPersonne[pid] !== undefined) parPersonne[pid] -= m;
     patrimoineFoyer -= m;
+    foyerLignes.push({ libelle: "Dette personnelle", categorie: "dette", nom: nomDe(pid), part: null, droit: "", fraction: 1, valeurBien: m, valeur: -m });
   });
 
   // Répartition par catégorie (valeur nette)
@@ -276,21 +280,33 @@ export function debrief(state) {
   const masseTransmiseParPar = {};
   const taxableParCategorie = {};
   parents.forEach((p) => (masseTransmiseParPar[p.id] = 0));
+  // Détail : lignes retenues dans la base (par catégorie) et lignes EXCLUES (avec la raison)
+  const taxableLignes = [], exclusLignes = [];
   detentions.forEach((d) => {
     const p = personnes.find((x) => x.id === d.proprietaire);
-    if (!p || p.role !== "parent") return; // seuls les biens des parents se transmettent
-    if (d.droit === "US") return;          // usufruit : extinction franche de droits (art. 1133)
     const a = actif(d.actifRef);
-    if (!a) return;
+    if (!p || !a) return;
+    const ligne = { libelle: a.libelle || a.id, categorie: a.categorie, nom: p.nom, part: Number(d.part) || 0, droit: d.droit, fraction: fractionDroit(d), valeurBien: actifNet(d.actifRef) };
+    if (p.role !== "parent") { // seuls les biens des parents se transmettent
+      exclusLignes.push({ ...ligne, valeur: valeurEconomique(d), raison: d.droit === "NP" ? "nue-propriété déjà donnée à l'enfant" : "déjà détenu par l'enfant" });
+      return;
+    }
+    if (d.droit === "US") {                // usufruit : extinction franche de droits (art. 1133)
+      exclusLignes.push({ ...ligne, valeur: valeurEconomique(d), raison: "usufruit du parent : s'éteint au décès sans droits (art. 1133)" });
+      return;
+    }
     let v = valeurEconomique(d);           // PP = pleine valeur ; NP = fraction nue-propriété
+    const brut = v;
+    let exo = 0;
     if (a.categorie === "entreprise" && a.dutreil) {
       dutreilAssiette += v;
-      const exo = DUTREIL_EXO * v;
+      exo = DUTREIL_EXO * v;
       exonerationDutreil += exo;
       v -= exo;                            // ne reste que les 25 % taxables
     }
     masseTransmiseParPar[d.proprietaire] += v;
     taxableParCategorie[a.categorie] = (taxableParCategorie[a.categorie] || 0) + v;
+    taxableLignes.push({ ...ligne, brut, exo, valeur: v });
   });
   // Dettes personnelles d'un parent réduisent sa masse transmissible
   Object.entries(detteParPersonne).forEach(([pid, m]) => {
@@ -332,12 +348,15 @@ export function debrief(state) {
   // abattement (celui du 1er parent est perdu). Sinon 1 par parent.
   const nbAbatEnfant = (state.regime === "universelle_attribution") ? 1 : Math.max(1, parents.length);
   let droitsSuccessionGlobaux = 0;
+  const droitsParEnfant = []; // détail « Droits de succession »
   if (enfants.length) {
     const partGlob = baseSuccessoraleGlobale / enfants.length;
     enfants.forEach((enf) => {
       const consomme = donations.filter((d) => d.beneficiaireId === enf.id && anneesEcoulees(d.date) < DELAI_RAPPEL_ANS).reduce((s, d) => s + d.montant, 0);
       const ab = Math.max(0, ABATTEMENTS.enfant * nbAbatEnfant - consomme);
-      droitsSuccessionGlobaux += calculDroits(Math.max(0, partGlob - ab), BAREME_LIGNE_DIRECTE);
+      const dr = calculDroits(Math.max(0, partGlob - ab), BAREME_LIGNE_DIRECTE);
+      droitsSuccessionGlobaux += dr;
+      droitsParEnfant.push({ nom: enf.nom, part: partGlob, abattementTheorique: ABATTEMENTS.enfant * nbAbatEnfant, consomme, abattement: ab, base: Math.max(0, partGlob - ab), droits: dr });
     });
   }
   const totalDroitsTous = droitsSuccessionGlobaux + totalDroitsAV;
@@ -413,6 +432,12 @@ export function debrief(state) {
     totalDettes,
     regime: state.regime || "",
     parPersonneDetail,
+    foyerLignes,
+    taxableLignes,
+    exclusLignes,
+    detteParPersonne,
+    droitsParEnfant,
+    nbAbatEnfant,
     avBeneficiaires,
     totalDroitsAV,
     apres70Reintegre,

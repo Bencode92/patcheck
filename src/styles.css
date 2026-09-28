@@ -820,3 +820,18 @@ summary.csum .tot { margin-left: auto; font-weight: 600; color: var(--muted); }
 .avg-seg.z31 { background: #f3b8b0; }
 .avg-mark { position: absolute; top: -3px; bottom: -3px; width: 3px; background: #0f2747; border-radius: 2px; box-shadow: 0 0 0 2px #fff; }
 .avg-foot { margin-top: 6px; }
+
+/* Synthèse des droits : lignes dépliables (détail bien par bien) */
+.fiche details.fd { border-bottom: 1px solid var(--line); }
+.fiche details.fd > summary.row { border-bottom: none; cursor: pointer; list-style: none; }
+.fiche details.fd > summary::-webkit-details-marker { display: none; }
+.fiche details.fd > summary:hover { background: #f5f8fc; }
+.fiche .chev { display: inline-block; width: 12px; color: var(--accent); transition: transform .15s; }
+.fiche details.fd[open] > summary .chev { transform: rotate(90deg); }
+.fiche .fd-body { padding: 8px 14px 14px 28px; background: #fafcff; }
+.fiche .det-tab { font-size: 12px; }
+.fiche .det-tab td, .fiche .det-tab th { padding: 5px 8px; }
+.fiche .det-tab th, .fiche .det-tab td { text-align: left; }
+.fiche .det-tab th.num, .fiche .det-tab td.num { text-align: right; white-space: nowrap; }
+.fiche .det-tab td.raison { white-space: normal; min-width: 180px; }
+.fiche .fd-body .table-wrap { overflow-x: auto; }

@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=107";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=107";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=107";
-import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=107";
-import * as sync from "./sync.js?v=107";
-import { askAI } from "./ai.js?v=107";
+} from "./data.js?v=108";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=108";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=108";
+import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=108";
+import * as sync from "./sync.js?v=108";
+import { askAI } from "./ai.js?v=108";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -703,22 +703,65 @@ async function renderOrganigramme() {
   }
 
   // ---- ⑤ Fiche de synthèse ----
+  // Chaque ligne se déplie : on voit bien par bien ce qui est compté (propriétaire,
+  // part, droit PP/US/NP, fraction 669, valeur retenue) et ce qui est EXCLU et pourquoi.
+  const LBL = { immobilier: "🏠 Immobilier", sci: "🏢 SCI", entreprise: `🏭 Entreprise détenue${d.exonerationDutreil > 0 ? " (après Dutreil −75 %)" : ""}`, liquidites: "💰 Liquidités", titres: "📈 Titres", capitalisation: "🏦 Contrat de capitalisation", autre: "Autre", av_apres70: "🛡️ AV après 70 ans réintégrée", dette: "💳 Dette" };
+  const CAT_COURT = { immobilier: "🏠 Immobilier", sci: "🏢 SCI", entreprise: "🏭 Entreprise", liquidites: "💰 Liquidités", titres: "📈 Titres", capitalisation: "🏦 Capitalisation", autre: "Autre", dette: "💳 Dette" };
+  const pc = (x) => (Math.round(x * 100) / 100).toLocaleString("fr-FR") + " %";
+  const droitTxt = (l) => l.droit === "PP" || !l.droit ? (l.droit || "") : `${l.droit} × ${pct(l.fraction)}`;
+  const tabLignes = (ls, opts = {}) => ls.length ? `<div class="table-wrap"><table class="grid2 det-tab">
+      <thead><tr><th>Bien</th><th>Détenteur</th><th class="num">Valeur nette du bien</th><th class="num">Part</th><th>Droit (669)</th>${opts.exo ? '<th class="num">Avant Dutreil</th><th class="num">Dutreil −75 %</th>' : ""}${opts.raison ? "<th>Pourquoi exclu</th>" : ""}<th class="num">${opts.raison ? "Exclu" : "Retenu"}</th></tr></thead>
+      <tbody>${ls.map((l) => `<tr><td>${l.libelle}${opts.cat ? ` <span class="muted small">${CAT_COURT[l.categorie] || l.categorie}</span>` : ""}</td><td>${l.nom}</td><td class="num">${eur(l.valeurBien)}</td><td class="num">${l.part == null ? "—" : pc(l.part)}</td><td>${droitTxt(l)}</td>${opts.exo ? `<td class="num">${eur(l.brut)}</td><td class="num pos">${l.exo ? "−" + eur(l.exo) : "—"}</td>` : ""}${opts.raison ? `<td class="small raison">${l.raison}</td>` : ""}<td class="num"><b>${eur(l.valeur)}</b></td></tr>`).join("")}</tbody>
+      <tfoot><tr><td colspan="${4 + (opts.exo ? 3 : 1) + (opts.raison ? 1 : 0)}">Total</td><td class="num"><b>${eur(ls.reduce((s2, l) => s2 + l.valeur, 0))}</b></td></tr></tfoot>
+    </table></div>` : `<div class="muted small">Aucune ligne.</div>`;
+  const ligneD = (cls, k, v, vcls, body) => `<details class="fd"><summary class="row ${cls}"><span class="k"><span class="chev">▸</span> ${k}</span><span class="v num ${vcls || ""}">${v}</span></summary><div class="fd-body">${body}</div></details>`;
+
+  const exclus = d.exclusLignes || [];
+  const exNP = exclus.filter((l) => !/usufruit/.test(l.raison)).reduce((s2, l) => s2 + l.valeur, 0);
+  const exUS = exclus.filter((l) => /usufruit/.test(l.raison)).reduce((s2, l) => s2 + l.valeur, 0);
+  const parentIds = new Set(parents.map((p) => p.id));
+  const dPers = Object.entries(d.detteParPersonne || {});
+  const dettesEnf = dPers.filter(([pid]) => !parentIds.has(pid)).reduce((s2, [, m]) => s2 + m, 0);
+  const pontCalc = d.patrimoineFoyer - exNP - exUS + dettesEnf - (d.exonerationDutreil || 0) + (d.apres70Reintegre || 0);
+  const ajust = d.baseSuccessoraleGlobale - pontCalc; // plancher à 0 des dettes perso d'un parent
+  const pont = `<div class="table-wrap"><table class="grid2 det-tab"><tbody>
+      <tr><td>Patrimoine net des biens (tout le foyer, parents + enfants)</td><td class="num">${eur(d.patrimoineFoyer)}</td></tr>
+      ${exNP ? `<tr><td>− biens déjà aux enfants (nue-propriété donnée) : ne passent pas en succession</td><td class="num pos">−${eur(exNP)}</td></tr>` : ""}
+      ${exUS ? `<tr><td>− usufruit des parents : s'éteint au décès sans droits (art. 1133)</td><td class="num pos">−${eur(exUS)}</td></tr>` : ""}
+      ${dettesEnf ? `<tr><td>+ dettes personnelles des enfants (hors succession des parents)</td><td class="num">+${eur(dettesEnf)}</td></tr>` : ""}
+      ${d.exonerationDutreil ? `<tr><td>− exonération Dutreil (75 % des parts entreprise sous pacte détenues par les parents)</td><td class="num pos">−${eur(d.exonerationDutreil)}</td></tr>` : ""}
+      ${d.apres70Reintegre ? `<tr><td>+ AV après 70 ans réintégrée</td><td class="num">+${eur(d.apres70Reintegre)}</td></tr>` : ""}
+      ${Math.abs(ajust) > 1 ? `<tr><td>ajustement (dette perso d'un parent supérieure à ses biens, plancher à 0)</td><td class="num">${ajust > 0 ? "+" : "−"}${eur(Math.abs(ajust))}</td></tr>` : ""}
+      <tr><td><b>= Base successorale globale</b></td><td class="num"><b>${eur(d.baseSuccessoraleGlobale)}</b></td></tr>
+    </tbody></table></div>`;
+
+  const cats = Object.entries(d.taxableParCategorie || {}).filter(([, v]) => v > 0.5).sort((a, b) => b[1] - a[1]);
+  const lignesCat = (k) => (d.taxableLignes || []).filter((l) => l.categorie === k);
+  const dutreilLignes = (d.taxableLignes || []).filter((l) => l.exo > 0);
+  const nbEnf = (d.droitsParEnfant || []).length;
+  const droitsBody = nbEnf ? `<div class="small muted" style="margin-bottom:6px">Base globale ÷ ${nbEnf} enfant(s), moins l'abattement restant (${d.nbAbatEnfant} × 100 000 € ${d.nbAbatEnfant === 1 ? "— attribution intégrale : l'abattement du 1er parent est perdu" : "— un par parent"}, diminué des donations des 15 dernières années), puis barème ligne directe.</div>
+    <div class="table-wrap"><table class="grid2 det-tab"><thead><tr><th>Enfant</th><th class="num">Part de la base</th><th class="num">Abattement</th><th class="num">Donations &lt; 15 ans</th><th class="num">Base taxable</th><th class="num">Droits</th><th class="num">Taux effectif</th></tr></thead>
+    <tbody>${d.droitsParEnfant.map((x) => `<tr><td>${x.nom}</td><td class="num">${eur(x.part)}</td><td class="num">${eur(x.abattementTheorique)}</td><td class="num">${x.consomme ? "−" + eur(x.consomme) : "—"}</td><td class="num">${eur(x.base)}</td><td class="num"><b>${eur(x.droits)}</b></td><td class="num">${x.part > 0 ? pct(x.droits / x.part) : "—"}</td></tr>`).join("")}</tbody>
+    <tfoot><tr><td colspan="5">Total</td><td class="num"><b>${eur(d.droitsSuccessionGlobaux)}</b></td><td></td></tr></tfoot></table></div>` : `<div class="muted small">Aucun enfant renseigné.</div>`;
+  const avBody = (d.avBeneficiaires || []).length ? `<div class="table-wrap"><table class="grid2 det-tab"><thead><tr><th>Bénéficiaire</th><th class="num">Capital reçu (avant 70)</th><th class="num">Droits 990 I</th></tr></thead>
+    <tbody>${d.avBeneficiaires.map((x) => `<tr><td>${x.nom}</td><td class="num">${eur(x.capital)}</td><td class="num"><b>${eur(x.taxe ?? x.droits ?? 0)}</b></td></tr>`).join("")}</tbody></table></div>
+    <div class="small muted" style="margin-top:6px">Abattement 152 500 € par bénéficiaire, puis 20 % jusqu'à 852 500 €, 31,25 % au-delà. Détail complet dans la carte « Assurance-vie » ci-dessous.</div>` : `<div class="muted small">Aucun contrat avant 70 ans.</div>`;
+
   const fiche = `<div class="card">
-    <h2>💰 Synthèse des droits</h2>
-    <div class="small muted" style="margin-bottom:10px">Comment on passe du patrimoine au total à payer.</div>
+    <div class="section-head"><div><h2>💰 Synthèse des droits</h2><div class="small muted">Comment on passe du patrimoine au total à payer. <b>Clique sur une ligne</b> pour voir bien par bien ce qui est compté.</div></div>
+      <button class="btn small" id="fd-all">Tout déplier</button></div>
     <div class="fiche">
-      <div class="row"><span class="k">Patrimoine net des biens</span><span class="v num">${eur(d.patrimoineFoyer)}</span></div>
-      ${d.exonerationDutreil > 0 ? `<div class="row sub"><span class="k">dont capital entreprise éligible Dutreil</span><span class="v num">${eur(d.dutreilAssiette)}</span></div>
+      ${ligneD("", "Patrimoine net des biens", eur(d.patrimoineFoyer), "", `<div class="small muted" style="margin-bottom:6px">Toutes les détentions des personnes du foyer (parents <b>et</b> enfants), US/NP valorisés au barème 669, dettes déduites. Les biens détenus via une SCI ne sont pas recomptés : ce sont les parts de SCI qui comptent.</div>${tabLignes(d.foyerLignes || [], { cat: true })}`)}
+      ${d.exonerationDutreil > 0 ? ligneD("sub", "dont capital entreprise éligible Dutreil", eur(d.dutreilAssiette), "", tabLignes(dutreilLignes, { exo: true })) + `
       <div class="row sub"><span class="k">Exonération Dutreil (−75 % de ce capital entreprise)</span><span class="v num pos">−${eur(d.exonerationDutreil)}</span></div>` : ""}
+      ${exclus.length ? ligneD("sub", "Exclu de la base (déjà aux enfants / usufruit des parents)", "−" + eur(exNP + exUS), "pos", tabLignes(exclus, { cat: true, raison: true })) : ""}
       ${d.apres70Reintegre > 0 ? `<div class="row sub"><span class="k">AV après 70 ans réintégrée (au-delà de 30 500 €)</span><span class="v num amb">+${eur(d.apres70Reintegre)}</span></div>` : ""}
-      <div class="row"><span class="k">Base successorale globale</span><span class="v num">${eur(d.baseSuccessoraleGlobale)}</span></div>
-      ${(() => {
-        const LBL = { immobilier: "🏠 Immobilier", sci: "🏢 SCI", entreprise: `🏭 Entreprise détenue${d.exonerationDutreil > 0 ? " (après Dutreil −75 %)" : ""}`, liquidites: "💰 Liquidités", titres: "📈 Titres", capitalisation: "🏦 Contrat de capitalisation", autre: "Autre", av_apres70: "🛡️ AV après 70 ans réintégrée" };
-        return Object.entries(d.taxableParCategorie || {}).filter(([, v]) => v > 0.5).sort((a, b) => b[1] - a[1])
-          .map(([k, v]) => `<div class="row sub"><span class="k">dont ${LBL[k] || k}</span><span class="v num">${eur(v)}</span></div>`).join("");
-      })()}
-      <div class="row sub"><span class="k">Droits de succession (enfants, après abattements)</span><span class="v num">${eur(d.droitsSuccessionGlobaux)}</span></div>
-      <div class="row sub"><span class="k">Droits assurance-vie 990 I (avant 70 ans)</span><span class="v num">${eur(d.totalDroitsAV)}</span></div>
+      ${ligneD("", "Base successorale globale", eur(d.baseSuccessoraleGlobale), "", `<div class="small muted" style="margin-bottom:6px">Le passage du patrimoine net à la base taxable :</div>${pont}`)}
+      ${cats.map(([k, v]) => k === "av_apres70"
+        ? `<div class="row sub"><span class="k">dont ${LBL[k]}</span><span class="v num">${eur(v)}</span></div>`
+        : ligneD("sub", "dont " + (LBL[k] || k), eur(v), "", tabLignes(lignesCat(k), { exo: k === "entreprise" && d.exonerationDutreil > 0 }))).join("")}
+      ${ligneD("sub", "Droits de succession (enfants, après abattements)", eur(d.droitsSuccessionGlobaux), "", droitsBody)}
+      ${ligneD("sub", "Droits assurance-vie 990 I (avant 70 ans)", eur(d.totalDroitsAV), "", avBody)}
       <div class="row grand"><span class="k">Total des droits à payer</span><span class="v num">${eur(d.totalDroitsTous)}</span></div>
     </div></div>`;
 
@@ -887,6 +930,13 @@ async function renderOrganigramme() {
     const open = tgl.textContent.includes("déplier");
     $$("#tab-content details.perso2, #tab-content details.cat2").forEach((el) => (el.open = open));
     tgl.textContent = open ? "Tout replier" : "Tout déplier";
+  });
+
+  const fdAll = $("#fd-all");
+  if (fdAll) fdAll.addEventListener("click", () => {
+    const open = fdAll.textContent.includes("déplier");
+    $$("#tab-content details.fd").forEach((el) => (el.open = open));
+    fdAll.textContent = open ? "Tout replier" : "Tout déplier";
   });
 
   // Miroir : filtrer les catégories (recalcul live des barres + équilibre)
