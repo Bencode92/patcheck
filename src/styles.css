@@ -853,3 +853,16 @@ details.faq-q .faq-v.pos { color: var(--accent-2); }
 .faq-warn { color: #96570a; }
 .faq-bar { display: inline-block; width: 90px; height: 8px; background: #eef2f7; border-radius: 4px; overflow: hidden; vertical-align: middle; }
 .faq-bar span { display: block; height: 100%; background: var(--accent); }
+
+/* Résumé en chapitres repliables */
+.chap-nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 6px; position: sticky; top: 0; z-index: 5; padding: 8px 0; background: var(--bg, #f3f6fb); }
+.chap-nav a { font-size: 13px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: #fff; color: var(--ink, #0f2747); text-decoration: none; }
+.chap-nav a:hover { border-color: var(--accent); color: var(--accent); }
+details.chap { margin-top: 14px; scroll-margin-top: 56px; }
+details.chap > summary.chap-head { cursor: pointer; list-style: none; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; padding: 12px 16px; border-radius: 12px; background: linear-gradient(90deg, #eaf1fb, #f6f9fd); border: 1px solid var(--line); }
+details.chap > summary::-webkit-details-marker { display: none; }
+details.chap > summary.chap-head::before { content: "▸"; color: var(--accent); transition: transform .15s; }
+details.chap[open] > summary.chap-head::before { transform: rotate(90deg); }
+.chap-t { font-size: 17px; font-weight: 700; }
+.chap-s { font-size: 12.5px; color: var(--muted); }
+.chap-body > .card:first-child { margin-top: 10px; }

@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=109";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=109";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=109";
-import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=109";
-import * as sync from "./sync.js?v=109";
-import { askAI } from "./ai.js?v=109";
+} from "./data.js?v=110";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=110";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=110";
+import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=110";
+import * as sync from "./sync.js?v=110";
+import { askAI } from "./ai.js?v=110";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -999,21 +999,11 @@ async function renderOrganigramme() {
     ? `<div class="card"><h2>🎯 Reste à faire / optimisation</h2><div class="reco-list">${d.reco.map((r) => `<div class="reco reco-${r.level}"><span class="reco-ico">${{ action: "➡️", info: "ℹ️", warn: "⚠️", ok: "✔️" }[r.level] || "•"}</span><span>${r.text}</span></div>`).join("")}</div></div>`
     : "";
 
-  c.innerHTML = `
-    ${!hasData ? `<div class="card"><p class="muted">Commence par saisir ta famille (onglet 👪 Famille) et ton patrimoine (onglet 🏦 Patrimoine). Le résumé se construit automatiquement ici.</p></div>` : ""}
-    ${cockpit}
-    ${brutNet}
-    ${mirror}
-    ${diptyque}
-    ${recapEnfants}
-    ${fiche}
-    ${faq}
-    ${avCard}
-    ${avAssureCard}
-    ${scenarios}
-    ${quiPossede}
-    ${recoCard}
-    <div class="card">
+  // Résumé en 4 chapitres repliables (l'essentiel ouvert) + sommaire cliquable.
+  // L'état ouvert/fermé de chaque chapitre est mémorisé (confort, best-effort).
+  let chapOpen = {};
+  try { chapOpen = JSON.parse(localStorage.getItem("patcheck_chapitres") || "{}"); } catch { chapOpen = {}; }
+  const organigramme = `<div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
         <h2 style="margin:0">🗺️ Organigramme patrimonial</h2>
         <button id="dl_svg" class="btn ghost">⬇ Exporter l'image (SVG)</button>
@@ -1021,6 +1011,32 @@ async function renderOrganigramme() {
       <div id="mermaid-box" class="mermaid-box"><div class="muted">Génération du schéma…</div></div>
       <p class="muted small">Traits pleins = pleine propriété · pointillés = démembrement (US/NP) · flèches épaisses = donations réalisées. 🔍 Schéma à taille réelle : <b>fais défiler</b> dans le cadre pour l'explorer, ou exporte le SVG.</p>
     </div>`;
+  const CHAPS = [
+    { id: "essentiel", titre: "📌 L'essentiel", sous: "Combien, pourquoi, et quoi faire", open: true, html: fiche + faq + recoCard },
+    { id: "enfants", titre: "👨‍👩‍👧 Ce que reçoit chaque enfant", sous: "Net perçu, ordre des décès, scénarios", open: false, html: recapEnfants + diptyque + scenarios },
+    { id: "av", titre: "🛡️ Assurance-vie", sous: "Par bénéficiaire, plafonds et marge", open: false, html: avCard + avAssureCard },
+    { id: "detail", titre: "🏦 Le patrimoine en détail", sous: "Brut → net, répartition par parent, qui possède quoi, organigramme", open: false, html: brutNet + mirror + quiPossede + organigramme },
+  ].filter((ch) => ch.html.trim());
+  const estOuvert = (ch) => (ch.id in chapOpen ? chapOpen[ch.id] : ch.open);
+
+  c.innerHTML = `
+    ${!hasData ? `<div class="card"><p class="muted">Commence par saisir ta famille (onglet 👪 Famille) et ton patrimoine (onglet 🏦 Patrimoine). Le résumé se construit automatiquement ici.</p></div>` : ""}
+    ${cockpit}
+    <nav class="chap-nav">${CHAPS.map((ch) => `<a href="#chap-${ch.id}" data-goto="${ch.id}">${ch.titre}</a>`).join("")}</nav>
+    ${CHAPS.map((ch) => `<details class="chap" id="chap-${ch.id}" data-chap="${ch.id}"${estOuvert(ch) ? " open" : ""}>
+      <summary class="chap-head"><span class="chap-t">${ch.titre}</span><span class="chap-s">${ch.sous}</span></summary>
+      <div class="chap-body">${ch.html}</div>
+    </details>`).join("")}`;
+
+  $$("#tab-content details.chap").forEach((el) => el.addEventListener("toggle", () => {
+    chapOpen[el.dataset.chap] = el.open;
+    try { localStorage.setItem("patcheck_chapitres", JSON.stringify(chapOpen)); } catch { /* confort seulement */ }
+  }));
+  $$("#tab-content .chap-nav a").forEach((a) => a.addEventListener("click", (e) => {
+    e.preventDefault();
+    const el = $("#chap-" + a.dataset.goto);
+    if (el) { el.open = true; el.scrollIntoView({ behavior: "smooth", block: "start" }); }
+  }));
 
   // Interactions
   $("#exp_resume")?.addEventListener("click", () => exporterResume(false));
