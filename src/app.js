@@ -2,12 +2,12 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=108";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=108";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=108";
-import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=108";
-import * as sync from "./sync.js?v=108";
-import { askAI } from "./ai.js?v=108";
+} from "./data.js?v=109";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=109";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=109";
+import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=109";
+import * as sync from "./sync.js?v=109";
+import { askAI } from "./ai.js?v=109";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -765,6 +765,104 @@ async function renderOrganigramme() {
       <div class="row grand"><span class="k">Total des droits à payer</span><span class="v num">${eur(d.totalDroitsTous)}</span></div>
     </div></div>`;
 
+  // ---- ⑤ bis Comprendre ses droits (FAQ chiffrée sur les données) ----
+  // Tout est recalculé avec la même règle que le moteur : base ÷ n enfants,
+  // abattement restant par enfant, barème ligne directe.
+  let faq = "";
+  const DPE = d.droitsParEnfant || [];
+  if (DPE.length && d.baseSuccessoraleGlobale > 0) {
+    const nE = DPE.length;
+    const droitsSur = (base, nbAbat = d.nbAbatEnfant) => DPE.reduce((s2, x) =>
+      s2 + calculDroits(Math.max(0, base / nE - Math.max(0, ABATTEMENTS.enfant * nbAbat - x.consomme)), BAREME_LIGNE_DIRECTE), 0);
+    const B = d.baseSuccessoraleGlobale, T = d.droitsSuccessionGlobaux;
+    const evite = (v) => T - droitsSur(Math.max(0, B - v));
+    // Taux marginal : tranche atteinte par la part taxable de l'enfant le plus taxé
+    const baseMax = Math.max(...DPE.map((x) => x.base));
+    const trMarg = BAREME_LIGNE_DIRECTE.find((t) => baseMax <= t.plafond) || BAREME_LIGNE_DIRECTE[BAREME_LIGNE_DIRECTE.length - 1];
+    const cout100k = droitsSur(B + 100000) - T;
+    const tauxMoyen = B > 0 ? T / B : 0;
+
+    // Q2 : ce qui coûte le plus — par catégorie puis par bien
+    const LBLc = { immobilier: "🏠 Immobilier", sci: "🏢 SCI", entreprise: "🏭 Entreprise (après Dutreil)", liquidites: "💰 Liquidités", titres: "📈 Titres", capitalisation: "🏦 Capitalisation", autre: "Autre", av_apres70: "🛡️ AV après 70 ans" };
+    const catsQ = Object.entries(d.taxableParCategorie || {}).filter(([, v]) => v > 0.5).sort((a, b) => b[1] - a[1]);
+    const parBien = {};
+    (d.taxableLignes || []).forEach((l) => { const k = l.libelle; parBien[k] = parBien[k] || { libelle: k, categorie: l.categorie, valeur: 0 }; parBien[k].valeur += l.valeur; });
+    const biens = Object.values(parBien).sort((a, b) => b.valeur - a.valeur);
+    const top = biens[0];
+
+    // Q3 : Dutreil
+    const exo = d.exonerationDutreil || 0;
+    const sansDutreil = exo ? droitsSur(B + exo) : T;
+    const ecoDutreil = sansDutreil - T;
+    const entLignes = (d.taxableLignes || []).filter((l) => l.categorie === "entreprise");
+    const entSansPacte = entLignes.filter((l) => !l.exo);
+    const npEntEnfants = (d.exclusLignes || []).filter((l) => l.categorie === "entreprise" && !/usufruit/.test(l.raison));
+
+    // Q5 : régime (attribution intégrale = 1 abattement perdu)
+    const coutRegime = d.nbAbatEnfant === 1 ? T - droitsSur(B, 2) : 0;
+
+    const q = (titre, corps, open) => `<details class="faq-q"${open ? " open" : ""}><summary>${titre}</summary><div class="faq-a">${corps}</div></details>`;
+    const barW = (v, max) => `<span class="faq-bar"><span style="width:${Math.max(2, Math.round(v / max * 100))}%"></span></span>`;
+
+    faq = `<div class="card">
+      <div class="section-head"><div><h2>❓ Comprendre tes droits</h2><div class="small muted">Les questions à se poser, avec <b>tes</b> chiffres. Estimation : les deux successions prises ensemble, comme dans la Synthèse ci-dessus.</div></div></div>
+      ${q(`1. Combien je vais payer, et à quel taux ? <b class="faq-v">${eur(d.totalDroitsTous)}</b>`, `
+        <p>Droits de succession : <b>${eur(T)}</b>${d.totalDroitsAV ? ` + assurance-vie : <b>${eur(d.totalDroitsAV)}</b>` : ""}. Sur une base taxable de ${eur(B)}, cela fait un <b>taux moyen de ${pct(tauxMoyen)}</b>.</p>
+        <p>Mais ce qui compte pour décider, c'est le <b>taux marginal</b> : la part de chaque enfant atteint la tranche à <b>${Math.round(trMarg.taux * 100)} %</b>. Autrement dit, <b>chaque 100 000 € de plus</b> dans la succession coûte <b>${eur(cout100k)}</b> de droits, et chaque 100 000 € que tu en sors (donation, démembrement, AV) t'en fait économiser à peu près autant.</p>
+        <table class="grid2 det-tab"><thead><tr><th>Enfant</th><th class="num">Reçoit (part de la base)</th><th class="num">Paie</th><th class="num">Taux effectif</th></tr></thead>
+        <tbody>${DPE.map((x) => `<tr><td>${x.nom}</td><td class="num">${eur(x.part)}</td><td class="num"><b>${eur(x.droits)}</b></td><td class="num">${pct(x.part > 0 ? x.droits / x.part : 0)}</td></tr>`).join("")}</tbody></table>`, true)}
+
+      ${q(`2. Qu'est-ce qui coûte le plus ?${top ? ` <b class="faq-v">${top.libelle}</b>` : ""}`, `
+        <p>Pour chaque bloc : son poids dans la base, et les <b>droits qu'on éviterait s'il sortait de la succession</b> (donné, démembré, vendu pour de l'AV…). Comme le barème est progressif, ce qu'on retire en premier est taxé au taux le plus haut : c'est le vrai chiffre pour choisir quoi transmettre en priorité. Les lignes ne s'additionnent donc pas au total.</p>
+        <table class="grid2 det-tab"><thead><tr><th>Catégorie</th><th class="num">Dans la base</th><th class="num">Poids</th><th></th><th class="num">Droits évités s'il sort</th></tr></thead>
+        <tbody>${catsQ.map(([k, v]) => `<tr><td>${LBLc[k] || k}</td><td class="num">${eur(v)}</td><td class="num">${pct(v / B)}</td><td>${barW(v, catsQ[0][1])}</td><td class="num"><b>${eur(evite(v))}</b></td></tr>`).join("")}</tbody></table>
+        <p style="margin-top:10px"><b>Bien par bien</b> (les 5 plus lourds) :</p>
+        <table class="grid2 det-tab"><thead><tr><th>Bien</th><th class="num">Dans la base</th><th class="num">Droits évités s'il sort</th></tr></thead>
+        <tbody>${biens.slice(0, 5).map((b) => `<tr><td>${b.libelle} <span class="muted small">${(LBLc[b.categorie] || b.categorie).replace(" (après Dutreil)", "")}</span></td><td class="num">${eur(b.valeur)}</td><td class="num"><b>${eur(evite(b.valeur))}</b></td></tr>`).join("")}</tbody></table>`)}
+
+      ${entLignes.length || npEntEnfants.length ? q(`3. L'entreprise et le pacte Dutreil : comment ça marche ?${ecoDutreil ? ` <b class="faq-v pos">−${eur(ecoDutreil)}</b>` : ""}`, `
+        <p><b>Le principe.</b> Le pacte Dutreil (art. 787 B CGI) fait entrer les titres de l'entreprise dans la succession pour <b>25 % seulement</b> de leur valeur : on n'exonère pas les droits, on <b>réduit l'assiette</b> de 75 %. Les droits se calculent ensuite normalement sur ce qui reste, avec les abattements et le barème.</p>
+        ${exo ? `<table class="grid2 det-tab"><tbody>
+          <tr><td>Titres entreprise encore détenus par les parents (sous pacte)</td><td class="num">${eur(d.dutreilAssiette)}</td></tr>
+          <tr><td>− 75 % exonérés</td><td class="num pos">−${eur(exo)}</td></tr>
+          <tr><td>= entrent dans la base</td><td class="num"><b>${eur(d.dutreilAssiette - exo)}</b></td></tr>
+          <tr><td>Droits <b>sans</b> Dutreil</td><td class="num">${eur(sansDutreil)}</td></tr>
+          <tr><td>Droits <b>avec</b> Dutreil</td><td class="num">${eur(T)}</td></tr>
+          <tr><td><b>Économie grâce au pacte</b></td><td class="num pos"><b>${eur(ecoDutreil)}</b></td></tr>
+        </tbody></table>` : ""}
+        ${entSansPacte.length ? `<p class="faq-warn">⚠️ ${entSansPacte.map((l) => `<b>${l.libelle}</b>`).join(", ")} : ${eur(entSansPacte.reduce((s2, l) => s2 + l.valeur, 0))} de titres entreprise <b>sans pacte</b>, taxés à 100 %. Un pacte en ferait sortir 75 %, soit environ <b>${eur(evite(0.75 * entSansPacte.reduce((s2, l) => s2 + l.valeur, 0)))}</b> de droits en moins.</p>` : ""}
+        ${npEntEnfants.length ? `<p><b>Les parts déjà données aux enfants</b> (nue-propriété, ${eur(npEntEnfants.reduce((s2, l) => s2 + l.valeur, 0))} au barème 669) <b>ne repassent pas</b> par la succession : l'usufruit s'éteint au décès sans droits (art. 1133). Le Dutreil a déjà joué au moment de <b>cette donation</b>. Au décès, il ne porte que sur les titres que les parents ont gardés.</p>` : ""}
+        <p><b>Les conditions à tenir</b> (sinon l'exonération tombe et les droits sont rappelés avec intérêts) :</p>
+        <ul class="faq-list">
+          <li><b>Engagement collectif</b> de conservation d'au moins <b>2 ans</b>, signé <b>avant</b> la transmission (ou « réputé acquis » : ≥ 34 % des droits de vote détenus depuis 2 ans avec une fonction de direction ; ou pacte signé dans les <b>6 mois après le décès</b> par les héritiers).</li>
+          <li><b>Engagement individuel</b> de chaque héritier ou donataire de garder les titres <b>4 ans</b> après la fin de l'engagement collectif.</li>
+          <li><b>Fonction de direction</b> exercée par l'un des signataires pendant l'engagement collectif et <b>3 ans</b> après la transmission.</li>
+          <li>Société <b>opérationnelle</b> (industrielle, commerciale, artisanale, libérale) ou <b>holding animatrice</b>. Une holding patrimoniale ne passe pas.</li>
+        </ul>
+        <p><b>Le levier en plus :</b> une <b>donation en pleine propriété avant 70 ans</b> sous Dutreil donne droit en plus à <b>−50 % sur les droits</b> (art. 790). Une donation en nue-propriété n'y a pas droit, mais elle est souvent moins chère au total parce que la base n'est plus que la valeur NP (barème 669). Le comparatif chiffré des voies est dans l'onglet <b>Simulateur</b>.</p>
+        <p class="muted small">À faire valider par le notaire : périmètre exact du pacte, caractère animateur de la holding, et biens non professionnels à exclure de la valeur.</p>`) : ""}
+
+      ${q(`4. Pourquoi la base est bien plus petite que mon patrimoine ?`, `
+        <p>Le patrimoine du foyer (${eur(d.patrimoineFoyer)}) compte <b>tout le monde</b>, enfants compris. La base taxable ne garde que ce que <b>les parents transmettront à leur décès</b> :</p>
+        <ul class="faq-list">
+          <li>la <b>nue-propriété déjà donnée</b> appartient déjà aux enfants : elle ne se transmet plus ;</li>
+          <li>l'<b>usufruit</b> des parents s'éteint à leur décès et les enfants récupèrent la pleine propriété <b>sans droits</b> (art. 1133) ;</li>
+          <li>le <b>Dutreil</b> retire 75 % des titres sous pacte ;</li>
+          <li>l'<b>assurance-vie avant 70 ans</b> est taxée à part (990 I, 152 500 € par bénéficiaire), hors succession.</li>
+        </ul>
+        <p>Le calcul exact, ligne par ligne, est dans la Synthèse ci-dessus : dépliez « Base successorale globale ».</p>`)}
+
+      ${q(`5. Où sont les leviers les plus forts ?`, `
+        <ul class="faq-list">
+          ${top ? `<li><b>Transmettre en priorité ce qui pèse le plus</b> : sortir ${top.libelle} de la succession éviterait environ <b>${eur(evite(top.valeur))}</b> de droits. Le démembrement est souvent la meilleure voie : on donne la NP au barème 669 et l'usufruit s'éteint ensuite sans droits.</li>` : ""}
+          <li><b>Chaque 100 000 € sorti</b> fait économiser environ <b>${eur(cout100k)}</b> (taux marginal ${Math.round(trMarg.taux * 100)} %).</li>
+          ${DPE.some((x) => x.abattement > 0) ? `<li><b>Abattements disponibles</b> : ${DPE.filter((x) => x.abattement > 0).map((x) => `${x.nom} ${eur(x.abattement)}`).join(", ")}. Donnés aujourd'hui, ils se <b>rechargent au bout de 15 ans</b> ; gardés pour la succession, ils ne servent qu'une fois.</li>` : `<li>Tous les abattements sont déjà consommés : ils se rechargent 15 ans après chaque donation (voir l'onglet Abattements).</li>`}
+          ${coutRegime > 0 ? `<li class="faq-warn"><b>Le régime matrimonial coûte ${eur(coutRegime)}</b> : avec l'attribution intégrale, les enfants n'héritent qu'au 2d décès et perdent l'abattement de 100 000 € du 1er parent.</li>` : ""}
+          ${entSansPacte.length ? `<li><b>Mettre sous pacte Dutreil</b> les titres entreprise qui n'y sont pas (voir question 3).</li>` : ""}
+        </ul>`)}
+    </div>`;
+  }
+
   // ---- ⑦ AV par bénéficiaire ----
   let avCard = "";
   if ((d.avBeneficiaires || []).length) {
@@ -909,6 +1007,7 @@ async function renderOrganigramme() {
     ${diptyque}
     ${recapEnfants}
     ${fiche}
+    ${faq}
     ${avCard}
     ${avAssureCard}
     ${scenarios}

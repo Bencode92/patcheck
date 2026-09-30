@@ -835,3 +835,21 @@ summary.csum .tot { margin-left: auto; font-weight: 600; color: var(--muted); }
 .fiche .det-tab th.num, .fiche .det-tab td.num { text-align: right; white-space: nowrap; }
 .fiche .det-tab td.raison { white-space: normal; min-width: 180px; }
 .fiche .fd-body .table-wrap { overflow-x: auto; }
+
+/* Comprendre tes droits (FAQ chiffrée) */
+details.faq-q { border: 1px solid var(--line); border-radius: 10px; margin-top: 8px; background: #fff; }
+details.faq-q > summary { cursor: pointer; padding: 11px 14px; font-weight: 600; font-size: 14px; list-style: none; display: flex; gap: 8px; align-items: center; }
+details.faq-q > summary::-webkit-details-marker { display: none; }
+details.faq-q > summary::before { content: "▸"; color: var(--accent); transition: transform .15s; }
+details.faq-q[open] > summary::before { transform: rotate(90deg); }
+details.faq-q .faq-v { margin-left: auto; font-variant-numeric: tabular-nums; }
+details.faq-q .faq-v.pos { color: var(--accent-2); }
+.faq-a { padding: 2px 16px 14px 32px; font-size: 13.5px; line-height: 1.55; }
+.faq-a p { margin: 8px 0; }
+.faq-a .det-tab { font-size: 12.5px; margin: 6px 0; }
+.faq-a .det-tab th, .faq-a .det-tab td { text-align: left; padding: 5px 8px; }
+.faq-a .det-tab .num { text-align: right; white-space: nowrap; }
+.faq-list { margin: 6px 0; padding-left: 20px; } .faq-list li { margin: 5px 0; }
+.faq-warn { color: #96570a; }
+.faq-bar { display: inline-block; width: 90px; height: 8px; background: #eef2f7; border-radius: 4px; overflow: hidden; vertical-align: middle; }
+.faq-bar span { display: block; height: 100%; background: var(--accent); }
