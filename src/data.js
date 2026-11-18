@@ -79,7 +79,7 @@ export const AV_AVANT_70 = {
 };
 // Primes versées APRÈS 70 ans — art. 757 B
 export const AV_APRES_70 = {
-  abattementGlobal: 30500,   // global, tous bénéficiaires confondus
+  abattementGlobal: 30500,   // par ASSURÉ, tous contrats et bénéficiaires confondus
   // au-delà : les PRIMES (pas les gains) réintègrent l'actif successoral
 };
 
@@ -104,12 +104,73 @@ export function calculDroits(baseTaxable, bareme) {
   return Math.round(droits);
 }
 
+// ---------- Rappel fiscal (art. 784) ----------
+// Une donation est « rappelée » tant que 15 ans DATE À DATE ne sont pas écoulés
+// (donation du 02/03/2013 → purgée le 02/03/2028, pas avant).
+export function dansRappel(dateStr, ref = new Date()) {
+  const d = new Date(dateStr);
+  if (!dateStr || isNaN(d)) return false;
+  const fin = new Date(d);
+  fin.setFullYear(fin.getFullYear() + DELAI_RAPPEL_ANS);
+  return fin > ref;
+}
+// Date à laquelle une donation sort du rappel (abattement rechargé)
+export function finRappel(dateStr) {
+  const d = new Date(dateStr);
+  if (!dateStr || isNaN(d)) return null;
+  d.setFullYear(d.getFullYear() + DELAI_RAPPEL_ANS);
+  return d;
+}
+
+// Rappel fiscal d'un couple donateur → bénéficiaire.
+//  - le don familial de somme d'argent (art. 790 G, nature "somme_argent") est exonéré
+//    jusqu'à 31 865 € EN PLUS de l'abattement : seul le surplus consomme l'abattement ;
+//  - ce qui a dépassé l'abattement a déjà utilisé les tranches basses du barème
+//    (baseAnterieure) → la transmission suivante démarre plus haut dans le barème.
+export function rappelFiscal(donations, donateurId, beneficiaireId, ref = new Date(), plafond = ABATTEMENTS.enfant) {
+  const actives = (donations || []).filter(
+    (d) => d.donateurId === donateurId && d.beneficiaireId === beneficiaireId && dansRappel(d.date, ref)
+  );
+  const montant = (d) => Number(d.montant) || 0;
+  const somme790 = actives.filter((d) => d.nature === "somme_argent").reduce((s, d) => s + montant(d), 0);
+  const autres = actives.filter((d) => d.nature !== "somme_argent").reduce((s, d) => s + montant(d), 0);
+  const don790 = Math.min(somme790, DON_FAMILIAL_SOMME);
+  const total = autres + (somme790 - don790); // ce qui s'impute sur l'abattement puis le barème
+  const abattementConsomme = Math.min(plafond, total);
+  return {
+    donations: actives,
+    brut: autres + somme790,
+    don790,
+    total,
+    abattementConsomme,
+    abattementRestant: plafond - abattementConsomme,
+    baseAnterieure: Math.max(0, total - plafond),
+  };
+}
+
+// Droits sur une nouvelle base taxable compte tenu des tranches déjà consommées
+export function droitsAvecRappel(base, baseAnterieure = 0, bareme = BAREME_LIGNE_DIRECTE) {
+  if (base <= 0) return 0;
+  return calculDroits(baseAnterieure + base, bareme) - calculDroits(baseAnterieure, bareme);
+}
+
+// Âge exact (années révolues) à une date donnée
+export function ageExact(naissance, ref = new Date()) {
+  const n = new Date(naissance);
+  if (!naissance || isNaN(n)) return null;
+  let a = ref.getFullYear() - n.getFullYear();
+  const m = ref.getMonth() - n.getMonth();
+  if (m < 0 || (m === 0 && ref.getDate() < n.getDate())) a--;
+  return a;
+}
+
 export const BAREMES_PAR_LIEN = {
   enfant: BAREME_LIGNE_DIRECTE,
   petit_enfant: BAREME_LIGNE_DIRECTE,
   arriere_pt_enf: BAREME_LIGNE_DIRECTE,
   epoux_pacs: BAREME_EPOUX,
   frere_soeur: BAREME_FRERES_SOEURS,
+  neveu_niece: [{ plafond: Infinity, taux: 0.55 }], // art. 777 : parents jusqu'au 4e degré
   defaut: [{ plafond: Infinity, taux: 0.60 }],
 };
 

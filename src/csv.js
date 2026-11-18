@@ -78,8 +78,8 @@ export function stateToCSV(state) {
   section("PERSONNES", ["id", "nom", "role", "naissance"],
     (state.personnes || []).map((p) => [p.id, p.nom, p.role, p.naissance || ""]));
 
-  section("ACTIFS", ["id", "libelle", "categorie", "valeur", "dutreil", "annee_demembrement"],
-    (state.actifs || []).map((a) => [a.id, a.libelle, a.categorie, a.valeur, a.dutreil ? "oui" : "", a.demembrementAnnee || ""]));
+  section("ACTIFS", ["id", "libelle", "categorie", "valeur", "dutreil", "annee_demembrement", "residence_principale"],
+    (state.actifs || []).map((a) => [a.id, a.libelle, a.categorie, a.valeur, a.dutreil ? "oui" : "", a.demembrementAnnee || "", a.residencePrincipale ? "oui" : ""]));
 
   section("DETENTIONS", ["detenteur", "detenteur_id", "actif", "actif_id", "part_pct", "droit"],
     (state.detentions || []).map((d) => [nameOf(d.proprietaire), d.proprietaire, nameOf(d.actifRef), d.actifRef, d.part, d.droit]));
@@ -87,8 +87,8 @@ export function stateToCSV(state) {
   section("DETTES", ["id", "libelle", "montant", "adosse_a", "adosse_a_id"],
     (state.dettes || []).map((x) => [x.id, x.libelle, x.montant, nameOf(x.cible), x.cible]));
 
-  section("DONATIONS", ["donateur", "donateur_id", "beneficiaire", "beneficiaire_id", "date", "montant", "note"],
-    (state.donations || []).map((d) => [nameOf(d.donateurId), d.donateurId, nameOf(d.beneficiaireId), d.beneficiaireId, d.date, d.montant, d.note || ""]));
+  section("DONATIONS", ["donateur", "donateur_id", "beneficiaire", "beneficiaire_id", "date", "montant", "note", "nature"],
+    (state.donations || []).map((d) => [nameOf(d.donateurId), d.donateurId, nameOf(d.beneficiaireId), d.beneficiaireId, d.date, d.montant, d.note || "", d.nature || "pleine"]));
 
   section("ASSURANCE-VIE", ["id", "libelle", "etablissement", "souscripteur", "souscripteur_id", "capital", "regime", "per", "clause", "beneficiaires"],
     (state.av || []).map((a) => [a.id, a.libelle, a.etablissement || "", nameOf(a.souscripteurId), a.souscripteurId, a.montant, a.avant70 ? "avant 70 ans" : "apres 70 ans", a.per ? "oui" : "", a.clauseType || "designe", (a.beneficiaires || []).map(nameOf).join("|")]));
@@ -167,6 +167,7 @@ function csvToStateSectioned(rows) {
       const an = col(r, "annee_demembrement");
       const a = { id, libelle: lib, categorie: col(r, "categorie") || "autre", valeur: num(col(r, "valeur")), dutreil: yes(col(r, "dutreil")) };
       if (an) a.demembrementAnnee = num(an);
+      if (yes(col(r, "residence_principale"))) a.residencePrincipale = true;
       st.actifs.push(a);
       actByName[lib.toLowerCase()] = id;
     } else if (section.startsWith("DETENTION")) {
@@ -179,11 +180,11 @@ function csvToStateSectioned(rows) {
     } else if (section.startsWith("DONATION")) {
       const don = col(r, "donateur_id") || resolve(col(r, "donateur"), persByName) || col(r, "donateur");
       const ben = col(r, "beneficiaire_id") || resolve(col(r, "beneficiaire"), persByName) || col(r, "beneficiaire");
-      st.donations.push({ id: uid(), donateurId: don, beneficiaireId: ben, date: col(r, "date"), montant: num(col(r, "montant")), nature: "pleine", lien: "enfant", note: col(r, "note") });
+      st.donations.push({ id: uid(), donateurId: don, beneficiaireId: ben, date: col(r, "date"), montant: num(col(r, "montant")), nature: col(r, "nature") || "pleine", lien: "enfant", note: col(r, "note") });
     } else if (section.startsWith("ASSURANCE") || section.startsWith("AV") || section.startsWith("PER")) {
       const sous = col(r, "souscripteur_id") || resolve(col(r, "souscripteur"), persByName) || col(r, "souscripteur");
       const reg = col(r, "regime");
-      const bens = col(r, "beneficiaires").split(/[;|]/).map((s) => s.trim()).filter(Boolean).map((x) => resolve(x, persByName) || x);
+      const bens = col(r, "beneficiaires").split(/[;|,]/).map((s) => s.trim()).filter(Boolean).map((x) => resolve(x, persByName) || x);
       st.av.push({ id: col(r, "id") || uid(), libelle: col(r, "libelle"), etablissement: col(r, "etablissement"), souscripteurId: sous, montant: num(col(r, "capital") || col(r, "valeur")), avant70: /avant/i.test(reg) || yes(reg), per: yes(col(r, "per")), clauseType: col(r, "clause") || "designe", beneficiaires: bens });
     } else if (section.startsWith("REGIME") || section.startsWith("PARAM")) {
       st.regime = col(r, "regime") || String(r[0] ?? "").trim();

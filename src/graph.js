@@ -1,7 +1,7 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit } from "./data.js?v=110";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit, dansRappel, rappelFiscal, droitsAvecRappel } from "./data.js?v=111";
 
 // Année de naissance : la DATE complète prime (plus précise), puis année seule, puis âge
 function birthYear(p) {
@@ -36,6 +36,26 @@ const eur0 = (n) => Math.round(n || 0).toLocaleString("fr-FR") + " €";
 function anneesEcoulees(d) {
   return (new Date() - new Date(d)) / (365.25 * 864e5);
 }
+// Droits 990 I sur le capital reçu par UN bénéficiaire d'UN assuré
+function droits990I(cap) {
+  const base = Math.max(0, cap - AV_AVANT_70.abattement);
+  const t1 = Math.min(base, AV_AVANT_70.seuilTranche1), t2 = Math.max(0, base - AV_AVANT_70.seuilTranche1);
+  return { base, droits: Math.round(t1 * AV_AVANT_70.tauxTranche1 + t2 * AV_AVANT_70.tauxTranche2) };
+}
+// Part de chaque bénéficiaire dans un contrat (répartition %, sinon parts égales)
+function partsBenef(a) {
+  const bens = a.beneficiaires || [];
+  const rep = a.repartition || {};
+  const tot = bens.reduce((s, b) => s + (Number(rep[b]) || 0), 0);
+  return bens.map((b) => [b, tot > 0 ? (Number(rep[b]) || 0) / tot : 1 / bens.length]);
+}
+// Assiette 757 B d'un contrat : les PRIMES versées après 70 ans (pas les gains).
+// Champ « primes » facultatif ; à défaut, le capital sert d'approximation (majorante).
+const assiette757B = (a) => {
+  if (a.per) return Number(a.montant) || 0; // PER : primes + gains (choix prudent de l'app)
+  const pr = Number(a.primes);
+  return pr > 0 ? Math.min(pr, Number(a.montant) || pr) : Number(a.montant) || 0;
+};
 
 // Nettoie un libellé pour Mermaid
 const clean = (s) => String(s || "").replace(/["\n]/g, " ").replace(/[<>]/g, "").trim();
@@ -143,15 +163,24 @@ export function debrief(state) {
 
   // Âge de l'usufruitier par actif, FIGÉ à l'année du démembrement (barème 669
   // cristallisé à la date de la donation, pas recalculé au fil du temps).
-  const usuAgeParActif = {};
+  // Plusieurs usufruitiers sur un même bien (ex. bien commun : chaque parent donne sa
+  // moitié) → chaque quote-part est valorisée à l'âge de SON usufruitier (art. 669).
+  const usuAgeParActif = {};   // âge retenu pour l'affichage (le plus jeune)
+  const usuTauxParActif = {};  // taux d'usufruit moyen pondéré par les quote-parts
+  const usuAcc = {};
   detentions.forEach((d) => {
     if (d.droit === "US") {
       const a = actif(d.actifRef);
       const anneeRef = a && a.demembrementAnnee ? Number(a.demembrementAnnee) : undefined;
       const age = ageDePers(personnes.find((p) => p.id === d.proprietaire), anneeRef);
-      if (age != null) usuAgeParActif[d.actifRef] = age;
+      if (age == null) return;
+      usuAgeParActif[d.actifRef] = Math.min(usuAgeParActif[d.actifRef] ?? 999, age);
+      const w = Number(d.part) || 0;
+      const acc = (usuAcc[d.actifRef] ||= { w: 0, t: 0 });
+      acc.w += w; acc.t += w * tauxUsufruit(age);
     }
   });
+  Object.entries(usuAcc).forEach(([id, x]) => { if (x.w > 0) usuTauxParActif[id] = x.t / x.w; });
   // Repli quand aucune ligne "usufruit" n'est saisie : usufruit réservé par le couple
   // -> barème 669 sur l'usufruitier LE PLUS JEUNE (l'usufruit dure jusqu'au dernier décès),
   // à l'année du démembrement de l'actif (pas l'âge actuel).
@@ -165,8 +194,17 @@ export function debrief(state) {
 
   // Valeur ÉCONOMIQUE d'une détention : PP = pleine ; US = %usufruit ; NP = %nue-propriété
   // (US + NP sur les mêmes parts = la valeur pleine, pas de double compte).
-  const fractionDroit = (d) =>
-    d.droit === "US" ? tauxUsufruit(usuAge(d.actifRef)) : d.droit === "NP" ? 1 - tauxUsufruit(usuAge(d.actifRef)) : 1;
+  const usuTaux = (actifId) => usuTauxParActif[actifId] ?? tauxUsufruit(usuAge(actifId));
+  const ageUsufruitierLigne = (d) => {
+    const a = actif(d.actifRef);
+    const anneeRef = a && a.demembrementAnnee ? Number(a.demembrementAnnee) : undefined;
+    return ageDePers(personnes.find((p) => p.id === d.proprietaire), anneeRef);
+  };
+  const fractionDroit = (d) => {
+    if (d.droit === "US") { const ag = ageUsufruitierLigne(d); return ag != null ? tauxUsufruit(ag) : usuTaux(d.actifRef); }
+    if (d.droit === "NP") return 1 - usuTaux(d.actifRef);
+    return 1;
+  };
   const valeurEconomique = (d) => (actifNet(d.actifRef) * (Number(d.part) || 0)) / 100 * fractionDroit(d);
 
   // Patrimoine NET détenu par les personnes (biens logés en SCI non recomptés :
@@ -203,67 +241,89 @@ export function debrief(state) {
     parCategorie[a.categorie] = (parCategorie[a.categorie] || 0) + valeurEconomique(d);
   });
 
-  // Donations : total, rapportables (<15 ans), purgées
+  // Donations : total, rapportables (<15 ans date à date), purgées
+  const today = new Date();
   let dejaDonneTotal = 0, rapportable = 0;
   donations.forEach((d) => {
-    dejaDonneTotal += d.montant;
-    if (anneesEcoulees(d.date) < DELAI_RAPPEL_ANS) rapportable += d.montant;
+    dejaDonneTotal += Number(d.montant) || 0;
+    if (dansRappel(d.date, today)) rapportable += Number(d.montant) || 0;
   });
 
-  // Abattements restants par couple parent -> enfant
+  // Abattements restants par couple parent -> enfant (790 G hors abattement, art. 784)
+  const rappel = (parId, enfId) => rappelFiscal(donations, parId, enfId, today);
   const abatt = [];
   let capaciteExoneree = 0;
   parents.forEach((par) => {
     enfants.forEach((enf) => {
-      const consomme = donations
-        .filter((d) => d.donateurId === par.id && d.beneficiaireId === enf.id && anneesEcoulees(d.date) < DELAI_RAPPEL_ANS)
-        .reduce((s, d) => s + d.montant, 0);
-      const restant = Math.max(0, ABATTEMENTS.enfant - consomme);
-      capaciteExoneree += restant;
-      abatt.push({ parent: par.nom, enfant: enf.nom, consomme, restant });
+      const r = rappel(par.id, enf.id);
+      capaciteExoneree += r.abattementRestant;
+      abatt.push({ parent: par.nom, enfant: enf.nom, consomme: r.abattementConsomme, restant: r.abattementRestant, don790: r.don790 });
     });
   });
 
   // Assurance-vie (+ PER assurantiels). Régime effectif via avAvant70Effectif().
-  // Clause « conjoint à défaut enfants » : au 1er décès le contrat revient au conjoint
-  // survivant, TOTALEMENT exonéré (loi TEPA) → 0 droit, pas de réintégration. Les enfants
-  // ne sont taxés qu'au 2d décès (géré dans simulerDeces). Ici (snapshot « décès aujourd'hui »),
-  // le conjoint est réputé vivant → ces contrats ne génèrent aucun droit.
+  // Le conjoint bénéficiaire est TOTALEMENT exonéré (loi TEPA, 990 I et 757 B) :
+  //  - clause « conjoint à défaut enfants » quand le conjoint est vivant ;
+  //  - conjoint désigné nommément (parent ≠ assuré coché comme bénéficiaire).
+  // Snapshot « décès aujourd'hui » : le conjoint est réputé vivant.
+  const isParent = (id) => parents.some((p) => p.id === id);
   const goesToConjoint = (a) => (a.clauseType || "designe") === "conjoint_defaut_enfants" && parents.some((p) => p.id !== a.souscripteurId);
   let avAvant70 = 0, avApres70 = 0;
   av.forEach((a) => (avAvant70Effectif(a, personnes) ? (avAvant70 += a.montant) : (avApres70 += a.montant)));
 
-  // AV : capital réparti par bénéficiaire (selon répartition %, sinon parts égales)
-  const avBenef = {};
+  // 990 I : abattement 152 500 € par couple ASSURÉ → bénéficiaire (pas par bénéficiaire tous assurés)
+  const av990 = {};   // clé assuré|bénéficiaire
+  const avBenef = {}; // cumul par bénéficiaire (affichage)
+  // 757 B : primes après 70 ans, abattement 30 500 € par ASSURÉ, réintégrées dans SA succession
+  // au nom de chaque bénéficiaire (au prorata de sa part du contrat)
+  const p757 = {};    // assuré -> { total, parBenef: {b: assiette} }
   av.forEach((a) => {
     const m = Number(a.montant) || 0;
-    const bens = a.beneficiaires || [];
-    if (!bens.length || m <= 0 || goesToConjoint(a)) return; // conjoint bénéficiaire → exonéré
+    if (!(a.beneficiaires || []).length || m <= 0 || goesToConjoint(a)) return;
     const av70 = avAvant70Effectif(a, personnes);
-    const rep = a.repartition || {};
-    const totalRep = bens.reduce((s, b) => s + (Number(rep[b]) || 0), 0);
-    bens.forEach((b) => {
-      const share = totalRep > 0 ? (Number(rep[b]) || 0) / totalRep : 1 / bens.length;
+    const assure = a.souscripteurId || "?";
+    partsBenef(a).forEach(([b, share]) => {
+      if (isParent(b) && b !== a.souscripteurId) return; // conjoint désigné → exonéré
       (avBenef[b] ||= { avant70: 0, apres70: 0 });
-      if (av70) avBenef[b].avant70 += m * share;
-      else avBenef[b].apres70 += m * share;
+      if (av70) {
+        avBenef[b].avant70 += m * share;
+        av990[assure + "|" + b] = (av990[assure + "|" + b] || 0) + m * share;
+      } else {
+        avBenef[b].apres70 += m * share;
+        const x = (p757[assure] ||= { total: 0, parBenef: {} });
+        const ass = assiette757B(a) * share;
+        x.total += ass;
+        x.parBenef[b] = (x.parBenef[b] || 0) + ass;
+      }
     });
   });
-  // Droits 990 I (primes avant 70 ans) par bénéficiaire
+  const avParBenefDroits = {};
+  Object.entries(av990).forEach(([k, cap]) => {
+    const b = k.split("|")[1];
+    const r = droits990I(cap);
+    const o = (avParBenefDroits[b] ||= { base: 0, droits: 0, abattement: 0 });
+    o.base += r.base; o.droits += r.droits; o.abattement += Math.min(cap, AV_AVANT_70.abattement);
+  });
   const avBeneficiaires = Object.entries(avBenef).map(([pid, v]) => {
     const nom = personnes.find((p) => p.id === pid)?.nom || pid;
-    const base = Math.max(0, v.avant70 - AV_AVANT_70.abattement);
-    const t1 = Math.min(base, AV_AVANT_70.seuilTranche1);
-    const t2 = Math.max(0, base - AV_AVANT_70.seuilTranche1);
-    const droits = Math.round(t1 * AV_AVANT_70.tauxTranche1 + t2 * AV_AVANT_70.tauxTranche2);
-    return { nom, capital: v.avant70, apres70: v.apres70, abattement: Math.min(v.avant70, AV_AVANT_70.abattement), base, droits, net: v.avant70 - droits };
+    const r = avParBenefDroits[pid] || { base: 0, droits: 0, abattement: 0 };
+    return { nom, capital: v.avant70, apres70: v.apres70, abattement: r.abattement, base: r.base, droits: r.droits, net: v.avant70 - r.droits };
   }).filter((x) => x.capital > 0);
   const totalDroitsAV = avBeneficiaires.reduce((s, x) => s + x.droits, 0);
-  // Primes après 70 ans (757 B) : au-delà de l'abattement global, réintégrées à la succession
-  // (hors contrats qui reviennent au conjoint exonéré au 1er décès)
-  const apres70TaxableSum = av.filter((a) => !avAvant70Effectif(a, personnes) && !goesToConjoint(a)).reduce((s, a) => s + (Number(a.montant) || 0), 0);
-  const apres70Reintegre = Math.max(0, apres70TaxableSum - AV_APRES_70.abattementGlobal);
-
+  // Montant réintégré par assuré et par bénéficiaire (après abattement 30 500 € de l'assuré)
+  const reint757 = {}; // assuré -> { b: montant réintégré }
+  let apres70Reintegre = 0;
+  Object.entries(p757).forEach(([assure, x]) => {
+    const reste = Math.max(0, x.total - AV_APRES_70.abattementGlobal);
+    const k = x.total > 0 ? reste / x.total : 0;
+    reint757[assure] = {};
+    // Seule la part revenant aux ENFANTS entre dans leur base (les autres bénéficiaires
+    // sont taxés selon leur propre lien, non modélisé ici).
+    Object.entries(x.parBenef).forEach(([b, v]) => {
+      reint757[assure][b] = v * k;
+      if (enfants.some((e) => e.id === b)) apres70Reintegre += v * k;
+    });
+  });
   // « Si décès aujourd'hui » — détail par enfant.
   // Hypothèse simple : patrimoine réparti également entre les enfants, chaque
   // enfant bénéficiant d'un abattement de 100 000 € par parent (art. 779),
@@ -277,6 +337,7 @@ export function debrief(state) {
   //    détenues par les parents (l'exonération de la donation passée est un autre événement).
   let exonerationDutreil = 0;    // −75 % sur les parts entreprise détenues par les parents (pacte)
   let dutreilAssiette = 0;       // valeur des parts entreprise détenues éligibles (avant −75 %)
+  let abattementRP = 0;          // −20 % résidence principale (art. 764 bis)
   const masseTransmiseParPar = {};
   const taxableParCategorie = {};
   parents.forEach((p) => (masseTransmiseParPar[p.id] = 0));
@@ -304,9 +365,16 @@ export function debrief(state) {
       exonerationDutreil += exo;
       v -= exo;                            // ne reste que les 25 % taxables
     }
+    // Résidence principale occupée par le conjoint / un enfant mineur : −20 % (art. 764 bis)
+    let rp = 0;
+    if (a.categorie === "immobilier" && a.residencePrincipale) {
+      rp = 0.2 * v;
+      abattementRP += rp;
+      v -= rp;
+    }
     masseTransmiseParPar[d.proprietaire] += v;
     taxableParCategorie[a.categorie] = (taxableParCategorie[a.categorie] || 0) + v;
-    taxableLignes.push({ ...ligne, brut, exo, valeur: v });
+    taxableLignes.push({ ...ligne, brut, exo, rp, valeur: v });
   });
   // Dettes personnelles d'un parent réduisent sa masse transmissible
   Object.entries(detteParPersonne).forEach(([pid, m]) => {
@@ -317,75 +385,85 @@ export function debrief(state) {
   const patrimoineTaxable = Math.max(0, Object.values(masseTransmiseParPar).reduce((s, v) => s + v, 0));
   if (apres70Reintegre > 0) taxableParCategorie.av_apres70 = apres70Reintegre;
 
-  let droitsSuccessionEstimes = 0;
-  const successionParEnfant = [];
-  const partParEnfant = enfants.length ? patrimoineFoyer / enfants.length : 0;          // économique (reçu)
-  const partTaxableParEnfant = enfants.length ? patrimoineTaxable / enfants.length : 0; // après Dutreil
-  enfants.forEach((enf) => {
-    const consomme = donations
-      .filter((d) => d.beneficiaireId === enf.id && anneesEcoulees(d.date) < DELAI_RAPPEL_ANS)
-      .reduce((s, d) => s + d.montant, 0);
-    const abattementDispo = Math.max(0, ABATTEMENTS.enfant * parents.length - consomme);
-    const base = Math.max(0, partTaxableParEnfant - abattementDispo);
-    const droits = calculDroits(base, BAREME_LIGNE_DIRECTE);
-    droitsSuccessionEstimes += droits;
-    successionParEnfant.push({
-      nom: enf.nom,
-      recu: partParEnfant,
-      abattement: abattementDispo,
-      base,
-      droits,
-      net: partParEnfant - droits,
-      tauxEffectif: partParEnfant > 0 ? droits / partParEnfant : 0,
+  // ---- Droits de succession : UNE succession PAR PARENT ----
+  // Chaque parent transmet SA masse ; chaque enfant a 100 000 € d'abattement par parent
+  // (diminué des donations de CE parent < 15 ans) et le barème repart à zéro dans chaque
+  // succession (tranches basses déjà utilisées par les donations : art. 784).
+  // Hypothèses : masse de chaque parent partagée à égalité entre les enfants ; droits du
+  // conjoint survivant ignorés (exonéré) ; en attribution intégrale, tout passe au conjoint
+  // au 1er décès et les enfants héritent de l'ENSEMBLE au 2d décès (1 seul abattement).
+  const n = enfants.length;
+  const anneeNais = (p) => birthYear(p) ?? 0;
+  // Survivant présumé en attribution intégrale : le parent le plus jeune
+  const survivant = parents.length ? parents.reduce((a, b) => (anneeNais(b) > anneeNais(a) ? b : a)) : null;
+  const attributionRegime = state.regime === "universelle_attribution";
+  const massesBiens = (attribution) => {
+    const m = {};
+    parents.forEach((p) => (m[p.id] = 0));
+    const tot = Object.values(masseTransmiseParPar).reduce((s, v) => s + v, 0);
+    if (attribution && survivant) m[survivant.id] = tot;
+    else parents.forEach((p) => (m[p.id] = masseTransmiseParPar[p.id] || 0));
+    return m;
+  };
+  // Calcule les droits enfant par enfant. facteur : multiplie la masse de biens (FAQ « et si… »).
+  const calcSuccession = ({ attribution = attributionRegime, avecAV757 = true, facteur = 1 } = {}) => {
+    const masses = massesBiens(attribution);
+    const parEnfant = enfants.map((enf) => {
+      let part = 0, abattementTheorique = 0, consomme = 0, abattement = 0, base = 0, droits = 0, reintAV = 0;
+      const detail = [];
+      parents.forEach((par) => {
+        const biens = n ? (masses[par.id] * facteur) / n : 0;
+        const av757 = avecAV757 ? ((reint757[par.id] || {})[enf.id] || 0) : 0;
+        const recu = biens + av757;
+        // En attribution intégrale, l'abattement du prédécédé ne sert que si l'enfant reçoit
+        // quelque chose dans SA succession (ex. AV après 70 ans).
+        if (recu <= 0 && attribution && survivant && par.id !== survivant.id) return;
+        const r = rappel(par.id, enf.id);
+        const b = Math.max(0, recu - r.abattementRestant);
+        const dr = droitsAvecRappel(b, r.baseAnterieure, BAREME_LIGNE_DIRECTE);
+        part += recu; reintAV += av757; abattementTheorique += ABATTEMENTS.enfant;
+        consomme += r.abattementConsomme; abattement += Math.min(recu, r.abattementRestant);
+        base += b; droits += dr;
+        detail.push({ parent: par.nom, recu, abattementRestant: r.abattementRestant, baseAnterieure: r.baseAnterieure, base: b, droits: dr });
+      });
+      return { nom: enf.nom, id: enf.id, part, reintAV, abattementTheorique, consomme, abattement, base, droits, detail };
     });
-  });
+    return { parEnfant, total: parEnfant.reduce((s, x) => s + x.droits, 0) };
+  };
+
+  // Hors AV après 70 ans (vue « biens »)
+  const succBiens = calcSuccession({ avecAV757: false });
+  const droitsSuccessionEstimes = succBiens.total;
+  const partParEnfant = n ? patrimoineFoyer / n : 0; // économique (reçu)
+  const successionParEnfant = succBiens.parEnfant.map((x) => ({
+    nom: x.nom, recu: partParEnfant, abattement: x.abattement, base: x.base, droits: x.droits,
+    net: partParEnfant - x.droits, tauxEffectif: partParEnfant > 0 ? x.droits / partParEnfant : 0,
+  }));
 
   // Base successorale GLOBALE = assiette taxable des biens + AV après 70 ans réintégrée.
-  // Droits recalculés sur cette base (l'AV après 70 ans est taxée au barème succession).
   const baseSuccessoraleGlobale = patrimoineTaxable + apres70Reintegre;
-  // Nombre d'abattements enfant applicables : en attribution intégrale, tout revient
-  // au conjoint au 1er décès → les enfants n'héritent qu'au 2d décès avec 1 SEUL
-  // abattement (celui du 1er parent est perdu). Sinon 1 par parent.
-  const nbAbatEnfant = (state.regime === "universelle_attribution") ? 1 : Math.max(1, parents.length);
-  let droitsSuccessionGlobaux = 0;
-  const droitsParEnfant = []; // détail « Droits de succession »
-  if (enfants.length) {
-    const partGlob = baseSuccessoraleGlobale / enfants.length;
-    enfants.forEach((enf) => {
-      const consomme = donations.filter((d) => d.beneficiaireId === enf.id && anneesEcoulees(d.date) < DELAI_RAPPEL_ANS).reduce((s, d) => s + d.montant, 0);
-      const ab = Math.max(0, ABATTEMENTS.enfant * nbAbatEnfant - consomme);
-      const dr = calculDroits(Math.max(0, partGlob - ab), BAREME_LIGNE_DIRECTE);
-      droitsSuccessionGlobaux += dr;
-      droitsParEnfant.push({ nom: enf.nom, part: partGlob, abattementTheorique: ABATTEMENTS.enfant * nbAbatEnfant, consomme, abattement: ab, base: Math.max(0, partGlob - ab), droits: dr });
-    });
-  }
+  const nbAbatEnfant = attributionRegime ? 1 : Math.max(1, parents.length);
+  const succGlob = calcSuccession({});
+  const droitsSuccessionGlobaux = succGlob.total;
+  const droitsParEnfant = succGlob.parEnfant;
+  // Pour la FAQ : droits si la masse de BIENS valait `base` (AV 757 B inchangée)
+  const droitsPourBase = (base, opts = {}) =>
+    calcSuccession({ ...opts, facteur: patrimoineTaxable > 0 ? Math.max(0, base - apres70Reintegre) / patrimoineTaxable : 0 }).total;
   const totalDroitsTous = droitsSuccessionGlobaux + totalDroitsAV;
 
   // ------- Scénarios de transmission aux enfants (ordre des décès / régime) -------
-  // Hypothèse couple (2 parents). Estimation ligne directe, hors assurance-vie.
+  // Estimation ligne directe, hors assurance-vie. Un décès « simultané » donne
+  // toujours DEUX successions distinctes : même coût que la transmission progressive.
   let scenarios = null;
-  if (enfants.length) {
-    const n = enfants.length;
-    const dLD = (b) => calculDroits(Math.max(0, b), BAREME_LIGNE_DIRECTE);
-    const consommeEnf = (enf) =>
-      donations.filter((d) => d.beneficiaireId === enf.id && anneesEcoulees(d.date) < DELAI_RAPPEL_ANS).reduce((s, d) => s + d.montant, 0);
-    const build = (fnDroits) => {
-      const pe = enfants.map((enf) => ({ nom: enf.nom, recu: patrimoineTaxable / n, droits: fnDroits(enf) }));
-      return { parEnfant: pe, total: pe.reduce((s, e) => s + e.droits, 0) };
-    };
+  if (n) {
+    const toScn = (r) => ({ parEnfant: r.parEnfant.map((x) => ({ nom: x.nom, recu: x.part, droits: x.droits })), total: r.total });
+    const prog = toScn(calcSuccession({ attribution: false, avecAV757: false }));
     scenarios = {
-      // 2 abattements (100k × 2 parents), une seule transmission
-      simultane: build((enf) => dLD(patrimoineTaxable / n - Math.max(0, ABATTEMENTS.enfant * 2 - consommeEnf(enf)))),
-      // attribution intégrale : tout au conjoint au 1er décès, enfants au 2nd -> 1 seul abattement
-      attribution: build((enf) => dLD(patrimoineTaxable / n - Math.max(0, ABATTEMENTS.enfant - consommeEnf(enf)))),
-      // transmission à chaque décès : 2 assiettes de P/2 avec 100k chacune (tranches plus basses)
-      progressif: build((enf) => {
-        const demi = patrimoineTaxable / 2 / n;
-        return dLD(demi - Math.max(0, ABATTEMENTS.enfant - consommeEnf(enf))) + dLD(demi - ABATTEMENTS.enfant);
-      }),
+      progressif: prog,
+      attribution: toScn(calcSuccession({ attribution: true, avecAV757: false })),
+      simultane: prog,
     };
   }
-
   // ------- Reste à faire / pistes d'optimisation -------
   const reco = [];
   const eur = (n) => Math.round(n).toLocaleString("fr-FR") + " €";
@@ -426,6 +504,7 @@ export function debrief(state) {
     patrimoineFoyer,
     patrimoineTaxable,
     exonerationDutreil,
+    abattementRP,
     dutreilAssiette,
     taxableParCategorie,
     masseTransmiseParPar,
@@ -443,6 +522,7 @@ export function debrief(state) {
     apres70Reintegre,
     baseSuccessoraleGlobale,
     droitsSuccessionGlobaux,
+    droitsPourBase,
     totalDroitsTous,
     scenarios,
     reco,
@@ -571,63 +651,82 @@ export function simulerDeces(state, defuntId) {
     hypothese = "Estimation non différenciée par régime (v1) : masse transmise par chaque parent = ses biens détenus (hors usufruit)." + demembreNote;
   }
 
-  // Droits ligne directe des enfants sur une masse (abattement du parent concerné, rapport donations <15 ans)
-  const partEnfants = (masse, parentId) => {
-    if (!enfants.length || masse <= 0) return { rows: [], total: 0 };
-    const part = masse / enfants.length;
+  // Droits ligne directe des enfants dans la succession de `parentId` :
+  // masse de biens partagée à égalité + AV 757 B réintégrée au nom de chaque bénéficiaire.
+  // Abattement de CE parent diminué de SES donations < 15 ans (790 G hors abattement, art. 784).
+  const partEnfants = (masse, parentId, reintParBenef = {}) => {
+    if (!enfants.length) return { rows: [], total: 0 };
     const rows = enfants.map((enf) => {
-      const consomme = parentId
-        ? donations.filter((d) => d.donateurId === parentId && d.beneficiaireId === enf.id && anneesEcoulees(d.date) < DELAI_RAPPEL_ANS).reduce((s, d) => s + d.montant, 0)
-        : 0;
-      const ab = Math.max(0, ABATTEMENTS.enfant - consomme);
+      const part = Math.max(0, masse) / enfants.length + (reintParBenef[enf.id] || 0);
+      const r = parentId ? rappelFiscal(donations, parentId, enf.id) : { abattementRestant: ABATTEMENTS.enfant, baseAnterieure: 0 };
+      const ab = r.abattementRestant;
       const base = Math.max(0, part - ab);
-      const droits = calculDroits(base, BAREME_LIGNE_DIRECTE);
-      return { nom: enf.nom, recu: part, abattement: ab, base, droits, net: part - droits };
-    });
+      const droits = droitsAvecRappel(base, r.baseAnterieure, BAREME_LIGNE_DIRECTE);
+      return { nom: enf.nom, recu: part, abattement: Math.min(part, ab), base, droits, net: part - droits };
+    }).filter((x) => x.recu > 0);
     return { rows, total: rows.reduce((s, r) => s + r.droits, 0) };
   };
 
-  // Clause « conjoint à défaut enfants » : si le conjoint est VIVANT au dénouement (1er décès),
-  // il reçoit le contrat totalement exonéré (0 droit). S'il n'est plus là (2d décès), les enfants
-  // reçoivent « à défaut » et sont taxés normalement.
+  // Le conjoint bénéficiaire est exonéré (TEPA) : clause « conjoint à défaut enfants » s'il est
+  // VIVANT au dénouement, ou conjoint désigné nommément. Au 2d décès, la clause bascule sur les enfants.
   const goesToConjoint = (a) => (a.clauseType || "designe") === "conjoint_defaut_enfants" && conjoint;
-  // Taxation 990 I (primes avant 70 ans) par bénéficiaire, sur un jeu de contrats (spouseAlive = conjoint vivant)
-  const taxeAV990 = (contrats, spouseAlive) => {
-    const benef = {};
-    contrats.filter((a) => avAvant70Effectif(a, personnes) && !(spouseAlive && goesToConjoint(a))).forEach((a) => {
-      const m = Number(a.montant) || 0; const bens = a.beneficiaires || []; if (!bens.length || m <= 0) return;
-      const rep = a.repartition || {}; const tot = bens.reduce((s, b) => s + (Number(rep[b]) || 0), 0);
-      bens.forEach((b) => { const sh = tot > 0 ? (Number(rep[b]) || 0) / tot : 1 / bens.length; benef[b] = (benef[b] || 0) + m * sh; });
+  const isParent = (id) => parents.some((p) => p.id === id);
+  // Ventile un jeu de contrats : capital par (assuré|bénéficiaire) en 990 I, assiette 757 B par assuré,
+  // et ce qui part au CONJOINT survivant (exonéré, mais entre dans SON patrimoine).
+  const ventiler = (contrats, spouseAlive) => {
+    const c990 = {}, p757 = {}; let versConjoint = 0;
+    contrats.forEach((a) => {
+      const m = Number(a.montant) || 0; if (m <= 0) return;
+      if (spouseAlive && goesToConjoint(a)) { versConjoint += m; return; }
+      if (!(a.beneficiaires || []).length) return;
+      const av70 = avAvant70Effectif(a, personnes), assure = a.souscripteurId || "?";
+      partsBenef(a).forEach(([b, sh]) => {
+        if (isParent(b) && b !== a.souscripteurId) { if (spouseAlive) versConjoint += m * sh; return; }
+        if (av70) c990[assure + "|" + b] = (c990[assure + "|" + b] || 0) + m * sh;
+        else { const x = (p757[assure] ||= { total: 0, parBenef: {} }); const v = assiette757B(a) * sh; x.total += v; x.parBenef[b] = (x.parBenef[b] || 0) + v; }
+      });
     });
-    return Object.entries(benef).map(([pid, cap]) => {
-      const base = Math.max(0, cap - AV_AVANT_70.abattement);
-      const t1 = Math.min(base, AV_AVANT_70.seuilTranche1), t2 = Math.max(0, base - AV_AVANT_70.seuilTranche1);
-      const droits = Math.round(t1 * AV_AVANT_70.tauxTranche1 + t2 * AV_AVANT_70.tauxTranche2);
-      return { nom: nomDe(pid), capital: cap, abattement: Math.min(cap, AV_AVANT_70.abattement), base, droits, net: cap - droits };
-    }).filter((x) => x.capital > 0);
+    // 990 I : abattement par couple assuré → bénéficiaire, puis cumul par bénéficiaire pour l'affichage
+    const parB = {};
+    Object.entries(c990).forEach(([k, cap]) => {
+      const b = k.split("|")[1], r = droits990I(cap);
+      const o = (parB[b] ||= { capital: 0, abattement: 0, base: 0, droits: 0 });
+      o.capital += cap; o.abattement += Math.min(cap, AV_AVANT_70.abattement); o.base += r.base; o.droits += r.droits;
+    });
+    const av990 = Object.entries(parB).map(([pid, o]) => ({ nom: nomDe(pid), ...o, net: o.capital - o.droits })).filter((x) => x.capital > 0);
+    // 757 B : abattement 30 500 € par assuré, réintégration au nom de chaque bénéficiaire
+    const reint = {}; let reintTotal = 0;
+    Object.values(p757).forEach((x) => {
+      const reste = Math.max(0, x.total - AV_APRES_70.abattementGlobal), k = x.total > 0 ? reste / x.total : 0;
+      Object.entries(x.parBenef).forEach(([b, v]) => { reint[b] = (reint[b] || 0) + v * k; });
+      reintTotal += reste;
+    });
+    return { av990, reint, reintTotal, versConjoint };
   };
-  // Primes après 70 ans réintégrées (au-delà de l'abattement global 30 500 €)
-  const reintegreApres70 = (contrats, spouseAlive) => Math.max(0, contrats.filter((a) => !avAvant70Effectif(a, personnes) && !(spouseAlive && goesToConjoint(a))).reduce((t, a) => t + (Number(a.montant) || 0), 0) - AV_APRES_70.abattementGlobal);
 
   // Contrats dénoués : au 1er décès ceux du défunt (hors co-adhésion) ; au 2d ceux du conjoint + toute co-adhésion
   const contrats1 = av.filter((a) => a.souscripteurId === defuntId && !a.cosouscripteurId);
   const contrats2 = av.filter((a) => (conjoint && a.souscripteurId === conjoint.id && !a.cosouscripteurId) || a.cosouscripteurId);
 
-  // 1er décès (conjoint VIVANT → clause conjoint = exonéré)
-  const reint1 = reintegreApres70(contrats1, true);
-  const enf1 = partEnfants(masseBiens1 + reint1, defuntId);
-  const av1 = taxeAV990(contrats1, true);
+  // 1er décès (conjoint VIVANT → ce qui lui revient est exonéré)
+  const v1 = ventiler(contrats1, !!conjoint);
+  const enf1 = partEnfants(masseBiens1, defuntId, v1.reint);
+  const av1 = v1.av990;
   const droitsAV1 = av1.reduce((s, x) => s + x.droits, 0);
-  const avDenouees1 = contrats1.filter((a) => avAvant70Effectif(a, personnes) && !goesToConjoint(a)).map((a) => ({ contrat: a.libelle || a.id, beneficiaires: taxeAV990([a], true) }));
+  const avDenouees1 = contrats1.filter((a) => avAvant70Effectif(a, personnes) && !goesToConjoint(a)).map((a) => ({ contrat: a.libelle || a.id, beneficiaires: ventiler([a], !!conjoint).av990 }));
   const totalDroitsPremier = enf1.total + droitsAV1;
   const abattementsPerdus = attribution ? ABATTEMENTS.enfant * enfants.length : 0;
 
-  // 2d décès (conjoint décédé → clause « à défaut enfants » s'applique → enfants taxés)
-  const reint2 = reintegreApres70(contrats2, false);
-  const enf2 = partEnfants(masseBiens2 + reint2, conjoint ? conjoint.id : null);
-  const av2 = taxeAV990(contrats2, false);
+  // 2d décès : l'AV reçue par le conjoint au 1er décès est désormais dans SON patrimoine
+  // (hypothèse : conservée jusqu'à son décès) → taxée au barème succession.
+  const avRecueConjoint = conjoint ? v1.versConjoint : 0;
+  const v2 = ventiler(contrats2, false);
+  const enf2 = conjoint ? partEnfants(masseBiens2 + avRecueConjoint, conjoint.id, v2.reint) : { rows: [], total: 0 };
+  const av2 = conjoint ? v2.av990 : [];
   const droitsAV2 = av2.reduce((s, x) => s + x.droits, 0);
   const totalDroitsSecond = enf2.total + droitsAV2;
+  const reint2 = conjoint ? v2.reintTotal : 0;
+  if (avRecueConjoint > 0) hypothese += ` L'assurance-vie reçue par le conjoint au 1er décès (${Math.round(avRecueConjoint).toLocaleString("fr-FR")} €) est réintégrée dans son patrimoine et taxée à son décès.`;
 
   return {
     defunt: { id: defunt.id, nom: defunt.nom, age: ageDePers(defunt) },
@@ -643,7 +742,8 @@ export function simulerDeces(state, defuntId) {
       abattementsPerdus,
     },
     secondDeces: {
-      masse: masseBiens2 + reint2,
+      masse: masseBiens2 + avRecueConjoint + reint2,
+      avRecueConjoint,
       parEnfant: enf2.rows,
       avDenouees: av2,
       totalDroitsSecond,

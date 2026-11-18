@@ -3,11 +3,11 @@
 //  Consomme debrief(state) + barèmes data.js. Zéro DOM.
 //  Tout est INDICATIF, à valider avec un notaire.
 // =============================================================
-import { debrief, avAvant70Effectif } from "./graph.js?v=110";
+import { debrief, avAvant70Effectif } from "./graph.js?v=111";
 import {
-  ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70,
+  ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, dansRappel, finRappel, rappelFiscal,
   BAREME_LIGNE_DIRECTE, calculDroits, tauxUsufruit,
-} from "./data.js?v=110";
+} from "./data.js?v=111";
 
 const PLAFOND_AV = AV_AVANT_70.abattement; // 152 500 € / bénéficiaire (990 I)
 
@@ -20,10 +20,14 @@ export function droits990(capital) {
 }
 
 // Droits ligne directe sur une base TOTALE répartie entre nEnfants (abattement /enfant)
-function droitsLD(baseTotale, abattParEnfant, nEnfants) {
+// Droits ligne directe sur une base transmise par le COUPLE. Quand l'abattement par enfant
+// dépasse 100 000 €, il couvre deux parents → deux transmissions distinctes (une par parent,
+// moitié de la base chacune), chacune avec son propre barème progressif.
+export function droitsLD(baseTotale, abattParEnfant, nEnfants) {
   const n = Math.max(1, nEnfants);
-  const parEnfant = Math.max(0, baseTotale / n - abattParEnfant);
-  return calculDroits(parEnfant, BAREME_LIGNE_DIRECTE) * n;
+  const k = abattParEnfant > ABATTEMENTS.enfant + 1 ? 2 : 1;
+  const parEnfantParParent = Math.max(0, baseTotale / n / k - abattParEnfant / k);
+  return calculDroits(parEnfantParParent, BAREME_LIGNE_DIRECTE) * n * k;
 }
 
 // -------------------------------------------------------------
@@ -405,32 +409,33 @@ export function abattementMoyenADate(state, horizonAns = 0) {
   const personnes = state.personnes || [];
   const donations = state.donations || [];
   const enfants = personnes.filter((p) => p.role === "enfant");
-  const nbParents = Math.max(1, personnes.filter((p) => p.role === "parent").length);
+  const parents = personnes.filter((p) => p.role === "parent");
+  const nbParents = Math.max(1, parents.length);
   const plafond = ABATTEMENTS.enfant * nbParents;
   if (!enfants.length) return plafond;
-  const anneeActuelle = new Date().getFullYear();
-  const cut = anneeActuelle + (Number(horizonAns) || 0) - DELAI_RAPPEL_ANS; // dons d'année ≤ cut = purgés à l'horizon
-  const dispo = enfants.map((e) => {
-    const consomme = donations
-      .filter((d) => d.beneficiaireId === e.id && new Date(d.date).getFullYear() > cut)
-      .reduce((s, d) => s + (Number(d.montant) || 0), 0);
-    return Math.max(0, plafond - consomme);
-  });
+  // Date future exacte : un don n'est purgé que 15 ans DATE À DATE après sa date
+  const ref = new Date();
+  ref.setTime(ref.getTime() + (Number(horizonAns) || 0) * 365.25 * 864e5);
+  const dispo = enfants.map((e) =>
+    parents.length
+      ? parents.reduce((s, p) => s + rappelFiscal(donations, p.id, e.id, ref).abattementRestant, 0)
+      : plafond
+  );
   return dispo.reduce((s, x) => s + x, 0) / dispo.length;
 }
 
 // Délai (années) avant recharge COMPLÈTE de l'abattement = 15 ans après la donation
 // la plus RÉCENTE encore dans le rappel fiscal (0 si aucun don < 15 ans → déjà plein).
 export function horizonRechargePleine(state) {
-  const personnes = state.personnes || [];
   const donations = state.donations || [];
-  const anneeActuelle = new Date().getFullYear();
-  let maxAnneePurge = 0;
+  const now = new Date();
+  let maxFin = null;
   donations.forEach((d) => {
-    const an = new Date(d.date).getFullYear();
-    if (anneeActuelle - an < DELAI_RAPPEL_ANS) maxAnneePurge = Math.max(maxAnneePurge, an + DELAI_RAPPEL_ANS);
+    if (!dansRappel(d.date, now)) return;
+    const f = finRappel(d.date);
+    if (f && (!maxFin || f > maxFin)) maxFin = f;
   });
-  return maxAnneePurge ? Math.max(0, maxAnneePurge - anneeActuelle) : 0;
+  return maxFin ? Math.max(0, Math.ceil((maxFin - now) / (365.25 * 864e5))) : 0;
 }
 
 // -------------------------------------------------------------
@@ -446,8 +451,7 @@ export function timingDonations(state) {
   // Prochaine recharge par couple (donateur→bénéficiaire) = don le plus ANCIEN < 15 ans + 15 ans
   const rechargeParCouple = {};
   donations.forEach((d) => {
-    const ecoule = anneesEcoulees(d.date);
-    if (ecoule >= DELAI_RAPPEL_ANS) return;
+    if (!dansRappel(d.date)) return;
     const key = `${nom(d.donateurId)}→${nom(d.beneficiaireId)}`;
     const an = new Date(d.date).getFullYear() + DELAI_RAPPEL_ANS;
     if (!rechargeParCouple[key] || an < rechargeParCouple[key]) rechargeParCouple[key] = an;

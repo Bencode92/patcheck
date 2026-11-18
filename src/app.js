@@ -2,12 +2,13 @@ import {
   ABATTEMENTS, DON_FAMILIAL_SOMME, DELAI_RAPPEL_ANS,
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
-} from "./data.js?v=110";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=110";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=110";
-import { arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=110";
-import * as sync from "./sync.js?v=110";
-import { askAI } from "./ai.js?v=110";
+  dansRappel, finRappel, rappelFiscal, droitsAvecRappel,
+} from "./data.js?v=111";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=111";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=111";
+import { droitsLD, arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=111";
+import * as sync from "./sync.js?v=111";
+import { askAI } from "./ai.js?v=111";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -122,15 +123,11 @@ const enfants = () => state.personnes.filter((p) => p.role === "enfant");
 
 // Donations d'un donateur vers un bénéficiaire encore dans le
 // délai de rappel fiscal (15 ans). Renvoie total consommé + détail.
-function abattementConsomme(donateurId, beneficiaireId) {
-  const actives = state.donations.filter(
-    (d) =>
-      d.donateurId === donateurId &&
-      d.beneficiaireId === beneficiaireId &&
-      anneesEcoulees(d.date) < DELAI_RAPPEL_ANS
-  );
-  const total = actives.reduce((s, d) => s + parseNum(d.montant), 0);
-  return { total, donations: actives };
+// Rappel fiscal d'un couple donateur → bénéficiaire (15 ans date à date).
+// total = montant qui s'impute sur l'abattement (le don familial 790 G jusqu'à
+// 31 865 € n'y est PAS imputé : il s'ajoute à l'abattement).
+function abattementConsomme(donateurId, beneficiaireId, plafond = ABATTEMENTS.enfant) {
+  return rappelFiscal(state.donations, donateurId, beneficiaireId, new Date(), plafond);
 }
 
 function abattementPlafond(lien) {
@@ -155,12 +152,13 @@ function simulerTransmission(o) {
   const plafond = abattementPlafond(lien);
   let dejaConsomme = 0;
   if (o.donateurId && o.beneficiaireId) {
-    dejaConsomme = abattementConsomme(o.donateurId, o.beneficiaireId).total;
+    dejaConsomme = abattementConsomme(o.donateurId, o.beneficiaireId, plafond).total;
   }
   const abattementRestant = Math.max(0, plafond - dejaConsomme);
   const apresAbattement = Math.max(0, baseTaxable - abattementRestant);
   const bareme = BAREMES_PAR_LIEN[lien] || BAREMES_PAR_LIEN.defaut;
-  const droits = calculDroits(apresAbattement, bareme);
+  // art. 784 : les donations < 15 ans au-delà de l'abattement ont déjà utilisé les tranches basses
+  const droits = droitsAvecRappel(apresAbattement, Math.max(0, dejaConsomme - plafond), bareme);
 
   return {
     valeurPP: parseNum(o.montantPP),
@@ -305,7 +303,6 @@ function exporterResume(excludeEnt = false) {
     push("SCÉNARIOS DE TRANSMISSION", "Total droits enfants");
     push("Communauté universelle + attribution intégrale (1 abattement)", euro(d.scenarios.attribution.total));
     push("Transmission à chaque décès (2 abattements)", euro(d.scenarios.progressif.total));
-    push("Décès simultané (référence)", euro(d.scenarios.simultane.total));
   }
   // Biens & actifs (avec dette adossée et valeur nette)
   const detteActif = {};
@@ -353,7 +350,7 @@ function exporterResume(excludeEnt = false) {
   push("");
   push("DONATIONS RÉALISÉES", "Date", "Donateur", "Bénéficiaire", "Montant", "Statut rappel 15 ans");
   (S.donations || []).forEach((x) => {
-    const purge = anneesEcoulees(x.date) >= DELAI_RAPPEL_ANS;
+    const purge = !dansRappel(x.date);
     push("", x.date, personne(x.donateurId)?.nom || "", personne(x.beneficiaireId)?.nom || "", euro(x.montant), purge ? "purgée (>15 ans)" : "rapportable (<15 ans)");
   });
 
@@ -722,7 +719,7 @@ async function renderOrganigramme() {
   const parentIds = new Set(parents.map((p) => p.id));
   const dPers = Object.entries(d.detteParPersonne || {});
   const dettesEnf = dPers.filter(([pid]) => !parentIds.has(pid)).reduce((s2, [, m]) => s2 + m, 0);
-  const pontCalc = d.patrimoineFoyer - exNP - exUS + dettesEnf - (d.exonerationDutreil || 0) + (d.apres70Reintegre || 0);
+  const pontCalc = d.patrimoineFoyer - exNP - exUS + dettesEnf - (d.exonerationDutreil || 0) - (d.abattementRP || 0) + (d.apres70Reintegre || 0);
   const ajust = d.baseSuccessoraleGlobale - pontCalc; // plancher à 0 des dettes perso d'un parent
   const pont = `<div class="table-wrap"><table class="grid2 det-tab"><tbody>
       <tr><td>Patrimoine net des biens (tout le foyer, parents + enfants)</td><td class="num">${eur(d.patrimoineFoyer)}</td></tr>
@@ -730,6 +727,7 @@ async function renderOrganigramme() {
       ${exUS ? `<tr><td>− usufruit des parents : s'éteint au décès sans droits (art. 1133)</td><td class="num pos">−${eur(exUS)}</td></tr>` : ""}
       ${dettesEnf ? `<tr><td>+ dettes personnelles des enfants (hors succession des parents)</td><td class="num">+${eur(dettesEnf)}</td></tr>` : ""}
       ${d.exonerationDutreil ? `<tr><td>− exonération Dutreil (75 % des parts entreprise sous pacte détenues par les parents)</td><td class="num pos">−${eur(d.exonerationDutreil)}</td></tr>` : ""}
+      ${d.abattementRP ? `<tr><td>− abattement résidence principale (20 %, art. 764 bis)</td><td class="num pos">−${eur(d.abattementRP)}</td></tr>` : ""}
       ${d.apres70Reintegre ? `<tr><td>+ AV après 70 ans réintégrée</td><td class="num">+${eur(d.apres70Reintegre)}</td></tr>` : ""}
       ${Math.abs(ajust) > 1 ? `<tr><td>ajustement (dette perso d'un parent supérieure à ses biens, plancher à 0)</td><td class="num">${ajust > 0 ? "+" : "−"}${eur(Math.abs(ajust))}</td></tr>` : ""}
       <tr><td><b>= Base successorale globale</b></td><td class="num"><b>${eur(d.baseSuccessoraleGlobale)}</b></td></tr>
@@ -739,7 +737,7 @@ async function renderOrganigramme() {
   const lignesCat = (k) => (d.taxableLignes || []).filter((l) => l.categorie === k);
   const dutreilLignes = (d.taxableLignes || []).filter((l) => l.exo > 0);
   const nbEnf = (d.droitsParEnfant || []).length;
-  const droitsBody = nbEnf ? `<div class="small muted" style="margin-bottom:6px">Base globale ÷ ${nbEnf} enfant(s), moins l'abattement restant (${d.nbAbatEnfant} × 100 000 € ${d.nbAbatEnfant === 1 ? "— attribution intégrale : l'abattement du 1er parent est perdu" : "— un par parent"}, diminué des donations des 15 dernières années), puis barème ligne directe.</div>
+  const droitsBody = nbEnf ? `<div class="small muted" style="margin-bottom:6px">${d.nbAbatEnfant === 1 ? "Attribution intégrale : tout passe au conjoint au 1er décès, les enfants héritent de l'ensemble au 2d décès avec un seul abattement de 100 000 € (celui du 1er parent est perdu)." : "Une succession <b>par parent</b> : chaque enfant reçoit 1/" + nbEnf + " de la masse de chaque parent, avec 100 000 € d'abattement par parent (diminué des donations de ce parent des 15 dernières années, hors don familial 790 G) et le barème ligne directe appliqué séparément dans chaque succession."}</div>
     <div class="table-wrap"><table class="grid2 det-tab"><thead><tr><th>Enfant</th><th class="num">Part de la base</th><th class="num">Abattement</th><th class="num">Donations &lt; 15 ans</th><th class="num">Base taxable</th><th class="num">Droits</th><th class="num">Taux effectif</th></tr></thead>
     <tbody>${d.droitsParEnfant.map((x) => `<tr><td>${x.nom}</td><td class="num">${eur(x.part)}</td><td class="num">${eur(x.abattementTheorique)}</td><td class="num">${x.consomme ? "−" + eur(x.consomme) : "—"}</td><td class="num">${eur(x.base)}</td><td class="num"><b>${eur(x.droits)}</b></td><td class="num">${x.part > 0 ? pct(x.droits / x.part) : "—"}</td></tr>`).join("")}</tbody>
     <tfoot><tr><td colspan="5">Total</td><td class="num"><b>${eur(d.droitsSuccessionGlobaux)}</b></td><td></td></tr></tfoot></table></div>` : `<div class="muted small">Aucun enfant renseigné.</div>`;
@@ -754,6 +752,7 @@ async function renderOrganigramme() {
       ${ligneD("", "Patrimoine net des biens", eur(d.patrimoineFoyer), "", `<div class="small muted" style="margin-bottom:6px">Toutes les détentions des personnes du foyer (parents <b>et</b> enfants), US/NP valorisés au barème 669, dettes déduites. Les biens détenus via une SCI ne sont pas recomptés : ce sont les parts de SCI qui comptent.</div>${tabLignes(d.foyerLignes || [], { cat: true })}`)}
       ${d.exonerationDutreil > 0 ? ligneD("sub", "dont capital entreprise éligible Dutreil", eur(d.dutreilAssiette), "", tabLignes(dutreilLignes, { exo: true })) + `
       <div class="row sub"><span class="k">Exonération Dutreil (−75 % de ce capital entreprise)</span><span class="v num pos">−${eur(d.exonerationDutreil)}</span></div>` : ""}
+      ${d.abattementRP > 0 ? `<div class="row sub"><span class="k">Abattement résidence principale (−20 %, art. 764 bis)</span><span class="v num pos">−${eur(d.abattementRP)}</span></div>` : ""}
       ${exclus.length ? ligneD("sub", "Exclu de la base (déjà aux enfants / usufruit des parents)", "−" + eur(exNP + exUS), "pos", tabLignes(exclus, { cat: true, raison: true })) : ""}
       ${d.apres70Reintegre > 0 ? `<div class="row sub"><span class="k">AV après 70 ans réintégrée (au-delà de 30 500 €)</span><span class="v num amb">+${eur(d.apres70Reintegre)}</span></div>` : ""}
       ${ligneD("", "Base successorale globale", eur(d.baseSuccessoraleGlobale), "", `<div class="small muted" style="margin-bottom:6px">Le passage du patrimoine net à la base taxable :</div>${pont}`)}
@@ -772,8 +771,9 @@ async function renderOrganigramme() {
   const DPE = d.droitsParEnfant || [];
   if (DPE.length && d.baseSuccessoraleGlobale > 0) {
     const nE = DPE.length;
-    const droitsSur = (base, nbAbat = d.nbAbatEnfant) => DPE.reduce((s2, x) =>
-      s2 + calculDroits(Math.max(0, base / nE - Math.max(0, ABATTEMENTS.enfant * nbAbat - x.consomme)), BAREME_LIGNE_DIRECTE), 0);
+    // Même moteur que la Synthèse : une succession par parent, abattements de chaque parent.
+    // nbAbat = 2 → hors attribution intégrale (pour chiffrer le coût du régime).
+    const droitsSur = (base, nbAbat) => d.droitsPourBase(base, nbAbat === 2 ? { attribution: false } : {});
     const B = d.baseSuccessoraleGlobale, T = d.droitsSuccessionGlobaux;
     const evite = (v) => T - droitsSur(Math.max(0, B - v));
     // Taux marginal : tranche atteinte par la part taxable de l'enfant le plus taxé
@@ -948,14 +948,13 @@ async function renderOrganigramme() {
   if (d.scenarios) {
     const s = d.scenarios;
     const match = d.regime === "universelle_attribution" ? "attribution" : (d.regime && d.regime !== "" ? "progressif" : null);
-    const best = ["attribution", "progressif", "simultane"].reduce((a, b) => (s[b].total < s[a].total ? b : a));
+    const best = ["attribution", "progressif"].reduce((a, b) => (s[b].total < s[a].total ? b : a));
     const SC = [
       ["attribution", "Attribution intégrale", "Tout au conjoint au 1ᵉʳ décès, les enfants héritent en une fois au 2ᵈ (1 abattement)."],
       ["progressif", "Transmission progressive", "Deux successions successives : abattements et tranches basses jouent deux fois."],
-      ["simultane", "Décès simultané", "Hypothèse d'école : les deux masses transmises en même temps (2 abattements)."],
     ];
     scenarios = `<div class="card">
-      <div class="section-head"><div><h2>⚖️ Scénarios de transmission — coût comparé pour les enfants</h2><div class="small muted">Trois trajectoires, même patrimoine. L'écart vient des abattements utilisés une ou deux fois.</div></div></div>
+      <div class="section-head"><div><h2>⚖️ Scénarios de transmission — coût comparé pour les enfants</h2><div class="small muted">Deux trajectoires, même patrimoine. L'écart vient des abattements utilisés une ou deux fois (un décès simultané donne aussi deux successions : même coût que la transmission progressive).</div></div></div>
       <div class="scn-grid">${SC.map(([k, t, dsc]) => `<div class="scn ${k === best ? "best" : ""} ${k === match ? "current" : ""}">
         <div class="badges">${k === match ? '<span class="badge">Votre régime</span>' : ""}${k === best ? '<span class="badge ok">Le moins coûteux</span>' : ""}</div>
         <div class="t">${t}</div><div class="d">${dsc}</div>
@@ -1263,6 +1262,7 @@ function renderPatrimoine() {
         ${CAT_A_BANQUE.has(a.categorie) ? `<input class="f_etab" data-ai="${ai}" list="etabs" placeholder="Banque / Courtier" value="${a.etablissement || ""}" style="max-width:160px">` : ""}
         <input class="f_an" data-ai="${ai}" type="number" min="1900" max="${yr}" placeholder="Année acquis." value="${a.annee ?? ""}" style="max-width:120px">
         ${a.categorie === "entreprise" ? `<label class="benef-chk"><input type="checkbox" class="f_dut" data-ai="${ai}" ${a.dutreil ? "checked" : ""}> Dutreil −75%</label>` : ""}
+        ${a.categorie === "immobilier" ? `<label class="benef-chk" title="Art. 764 bis CGI : abattement de 20 % sur la valeur de la résidence principale au décès, si elle est occupée à cette date par le conjoint, le partenaire de PACS ou un enfant mineur/majeur protégé du défunt."><input type="checkbox" class="f_rp" data-ai="${ai}" ${a.residencePrincipale ? "checked" : ""}> Résidence principale (−20 % au décès)</label>` : ""}
         <button class="garde-btn ${a.aGarder ? "on" : ""}" data-garde="${ai}" title="À garder impérativement par le propriétaire — exclu des scénarios de donation/démembrement">${a.aGarder ? "🔒 À garder" : "🔓 Transmissible"}</button>
         <button class="verif-btn ${a.verifie ? "on" : ""}" data-verif="${ai}" title="Marquer comme vérifié">${a.verifie ? "✓ OK" : "OK"}</button>
         <button class="danger-link" data-del="actif" data-ai="${ai}" title="Supprimer ce bien">🗑</button>
@@ -1424,6 +1424,7 @@ function renderPatrimoine() {
       const a = A[+t.dataset.ai];
       if (t.classList.contains("f_cat")) { a.categorie = t.value; save(); renderPatrimoine(); }
       else if (t.classList.contains("f_dut")) { a.dutreil = t.checked; save(); }
+      else if (t.classList.contains("f_rp")) { a.residencePrincipale = t.checked; save(); }
       else if (t.classList.contains("f_demyr")) renderPatrimoine(); // retire l'alerte « année manquante »
     } else if (t.dataset.di != null) {
       const d = D[+t.dataset.di];
@@ -1454,9 +1455,9 @@ function renderDonations() {
             ? `<tr><td colspan="7" class="muted center">Aucune donation enregistrée.</td></tr>`
             : rows
                 .map((d) => {
-                  const ecoul = anneesEcoulees(d.date);
-                  const actif = ecoul < DELAI_RAPPEL_ANS;
-                  const restant = Math.max(0, DELAI_RAPPEL_ANS - ecoul);
+                  const actif = dansRappel(d.date);
+                  const fin = finRappel(d.date);
+                  const restant = actif && fin ? (fin - new Date()) / (365.25 * 864e5) : 0;
                   return `<tr data-id="${d.id}" class="${actif ? "" : "purged"}">
                     <td>${d.date || "—"}</td>
                     <td>${personne(d.donateurId)?.nom ?? "?"}</td>
@@ -1549,13 +1550,14 @@ function renderAbattements() {
     .map((enf) => {
       const parCol = parents()
         .map((par) => {
-          const { total } = abattementConsomme(par.id, enf.id);
+          const rf = abattementConsomme(par.id, enf.id);
           const plafond = ABATTEMENTS.enfant;
-          const restant = Math.max(0, plafond - total);
+          const total = rf.abattementConsomme;
+          const restant = rf.abattementRestant;
           const ratio = Math.min(1, total / plafond);
           // Prochaine recharge = la donation < 15 ans la plus ancienne (elle se purge en premier)
           const dons = state.donations
-            .filter((d) => d.donateurId === par.id && d.beneficiaireId === enf.id && anneesEcoulees(d.date) < DELAI_RAPPEL_ANS)
+            .filter((d) => d.donateurId === par.id && d.beneficiaireId === enf.id && dansRappel(d.date) && d.nature !== "somme_argent")
             .sort((a, b) => (a.date < b.date ? -1 : 1));
           const next = dons[0];
           return `<td>
@@ -1572,7 +1574,7 @@ function renderAbattements() {
   const totalDispo = enfants().reduce((s, enf) => {
     return (
       s +
-      parents().reduce((ss, par) => ss + Math.max(0, ABATTEMENTS.enfant - abattementConsomme(par.id, enf.id).total), 0)
+      parents().reduce((ss, par) => ss + abattementConsomme(par.id, enf.id).abattementRestant, 0)
     );
   }, 0);
 
@@ -1761,6 +1763,7 @@ function renderAv() {
             <label>Capital (€)<input class="av_mnt" value="${a.montant || ""}" inputmode="numeric"></label>
             <label>Année d'ouverture<input class="av_an" type="number" min="1950" max="${new Date().getFullYear()}" placeholder="ex : 2008" value="${a.annee ?? ""}"></label>
             <label>Régime des primes<select class="av_av70" ${a.per ? 'disabled title="Déterminé automatiquement par l’âge au décès pour un PER"' : ""}>${opt([["oui", "Avant 70 ans"], ["non", "Après 70 ans"]], a.avant70 ? "oui" : "non")}</select></label>
+            ${!a.avant70 && !a.per ? `<label title="Art. 757 B : seules les PRIMES versées après 70 ans sont réintégrées (au-delà de 30 500 € par assuré), pas les gains. Vide = le capital sert d'estimation (majorante).">Primes versées après 70 ans (€)<input class="av_primes" value="${a.primes || ""}" inputmode="numeric" placeholder="vide = capital"></label>` : ""}
           </div>
           <label class="benef-chk" style="margin-top:2px"><input type="checkbox" class="av_per" ${a.per ? "checked" : ""}> 🏦 <b>PER assurantiel</b> <span class="muted small">— régime déterminé par l'âge du souscripteur au décès (&lt; 70 → 990 I ; ≥ 70 → 757 B, primes + gains). Saisis la valeur TOTALE du contrat.</span></label>
           <label style="display:block;margin-top:8px">Type de clause bénéficiaire
@@ -1816,7 +1819,8 @@ function renderAv() {
     $(".av_cosous", row).addEventListener("change", (e) => { AV[i].cosouscripteurId = e.target.value || null; save(); });
     $(".av_mnt", row).addEventListener("input", (e) => { AV[i].montant = parseNum(e.target.value); save(); });
     $(".av_an", row).addEventListener("input", (e) => { AV[i].annee = e.target.value === "" ? null : Number(e.target.value); save(); });
-    $(".av_av70", row).addEventListener("change", (e) => { AV[i].avant70 = e.target.value === "oui"; save(); });
+    $(".av_av70", row).addEventListener("change", (e) => { AV[i].avant70 = e.target.value === "oui"; save(); renderAv(); });
+    $(".av_primes", row)?.addEventListener("input", (e) => { AV[i].primes = parseNum(e.target.value) || null; save(); });
     $(".av_per", row).addEventListener("change", (e) => { AV[i].per = e.target.checked; save(); renderAv(); });
     $(".av_clausetype", row).addEventListener("change", (e) => { AV[i].clauseType = e.target.value; save(); renderAv(); });
     $(".av_clause", row).addEventListener("input", (e) => { AV[i].clause = e.target.value; save(); });
@@ -1933,8 +1937,17 @@ function renderEntreprise() {
 
       <div class="result">
         <div class="line"><span>Valeur des titres</span><b>${eur(valeur)}</b></div>
-        ${a.dutreil ? `<div class="line"><span>Exonération Dutreil (−75 %, art. 787 B)</span><b style="color:var(--accent-2)">− ${eur(valeur * 0.75)}</b></div>
-        <div class="line total"><span>Assiette taxable en transmission</span><b>${eur(valeur * 0.25)}</b></div>` : `<div class="line"><span class="muted small">Sans pacte Dutreil : assiette taxable = valeur pleine.</span></div>`}
+        ${a.dutreil ? (() => {
+          // Seuls les titres ENCORE détenus par les parents (PP ou NP, hors usufruit qui s'éteint
+          // sans droits) restent à transmettre — même assiette que le Résumé.
+          const roleOf = (id) => state.personnes.find((p) => p.id === id)?.role;
+          const pctParents = dets.filter(({ d }) => roleOf(d.proprietaire) === "parent" && d.droit === "PP").reduce((s, { d }) => s + parsePart(d.part), 0);
+          const vRest = valeur * pctParents / 100;
+          return `<div class="line"><span>Titres encore détenus en pleine propriété par les parents (${Math.round(pctParents)} %)</span><b>${eur(vRest)}</b></div>
+        <div class="line"><span>Exonération Dutreil sur ces titres (−75 %, art. 787 B)</span><b style="color:var(--accent-2)">− ${eur(vRest * 0.75)}</b></div>
+        <div class="line total"><span>Assiette taxable restant à transmettre</span><b>${eur(vRest * 0.25)}</b></div>
+        ${pctParents < 100 ? `<div class="line"><span class="muted small">Les ${Math.round(100 - pctParents)} % restants sont déjà donnés (nue-propriété) ou ne sont qu'un usufruit qui s'éteint sans droits : ils ne sont plus taxés.</span></div>` : ""}`;
+        })() : `<div class="line"><span class="muted small">Sans pacte Dutreil : assiette taxable = valeur pleine.</span></div>`}
         ${tUS != null ? `<div class="line"><span>Démembrement — usufruitier ${usPers.nom} (${age} ans${a.demembrementAnnee ? " en " + a.demembrementAnnee : ", âge actuel"}) → usufruit ${pct(tUS)} / NP ${pct(1 - tUS)}</span><b>NP transmise : ${eur(npVal)}</b></div>` : ""}
         ${a.dutreil && npVal != null ? `<div class="line total"><span>💡 Donation de la nue-propriété sous Dutreil → base taxable</span><b>${eur(npVal)} × 25 % = ${eur(npVal * 0.25)}</b></div>` : ""}
         ${a.dutreil ? (() => {
@@ -2053,11 +2066,11 @@ function buildConseilContext(d) {
     L.push(`${a.per ? "PER assurantiel" : "Assurance-vie"} "${a.libelle || a.id}" chez ${a.etablissement || "?"}, souscripteur ${personne(a.souscripteurId)?.nom || "?"}${a.cosouscripteurId ? " & " + (personne(a.cosouscripteurId)?.nom || "") : ""}, capital ${e(a.montant)}, ${a.per ? "régime (990 I / 757 B) déterminé par l'âge du souscripteur au décès (primes+gains taxables si ≥70 ans)" : `primes ${a.avant70 ? "avant" : "après"} 70 ans`}, bénéficiaires : ${bens || "à définir"}.`);
   });
   (state.donations || []).forEach((x) => {
-    const purge = anneesEcoulees(x.date) >= DELAI_RAPPEL_ANS;
+    const purge = !dansRappel(x.date);
     L.push(`Donation ${x.date} : ${personne(x.donateurId)?.nom || "?"} → ${personne(x.beneficiaireId)?.nom || "?"}, ${e(x.montant)} (${purge ? "purgée >15 ans" : "rapportable <15 ans"}).`);
   });
   L.push(`Capacité de donation encore exonérée (abattements 100 000 € /parent /enfant non utilisés) : ${e(d.capaciteExoneree)}.`);
-  if (d.scenarios) L.push(`Scénarios de droits totaux pour les enfants : attribution intégrale au conjoint = ${e(d.scenarios.attribution.total)} ; transmission à chaque décès = ${e(d.scenarios.progressif.total)} ; décès simultané = ${e(d.scenarios.simultane.total)}.`);
+  if (d.scenarios) L.push(`Scénarios de droits totaux pour les enfants : attribution intégrale au conjoint = ${e(d.scenarios.attribution.total)} ; transmission à chaque décès = ${e(d.scenarios.progressif.total)}. (Un décès simultané donne aussi deux successions distinctes : même coût que la transmission à chaque décès.)`);
   // Droits estimés par enfant en cas de décès aujourd'hui
   (d.successionParEnfant || []).forEach((x) => L.push(`Si décès aujourd'hui, ${x.nom} reçoit ${e(x.recu)} et paierait ${e(x.droits)} de droits (net ${e(x.net)}).`));
   // Pistes déjà détectées automatiquement par l'app
@@ -2087,7 +2100,7 @@ function renderConseil() {
         <div class="line"><span>Assiette taxable succession (hors AV)</span><b>${eur2(d.patrimoineTaxable)}</b></div>
         <div class="line"><span>Droits de succession estimés aujourd'hui</span><b style="color:var(--warn)">${eur2(d.droitsSuccessionEstimes)}</b></div>
         <div class="line"><span>Encore donnable en franchise (abattements 15 ans)</span><b style="color:var(--accent-2)">${eur2(d.capaciteExoneree)}</b></div>
-        ${d.scenarios ? `<div class="line total"><span>Coût enfants — meilleur vs pire scénario</span><b>${eur2(Math.min(d.scenarios.progressif.total, d.scenarios.simultane.total, d.scenarios.attribution.total))} → ${eur2(Math.max(d.scenarios.progressif.total, d.scenarios.simultane.total, d.scenarios.attribution.total))}</b></div>` : ""}
+        ${d.scenarios ? `<div class="line total"><span>Coût enfants — meilleur vs pire scénario</span><b>${eur2(Math.min(d.scenarios.progressif.total, d.scenarios.attribution.total))} → ${eur2(Math.max(d.scenarios.progressif.total, d.scenarios.attribution.total))}</b></div>` : ""}
       </div>
     </div>
 
@@ -2415,13 +2428,22 @@ function renderOptimiseur() {
   // --- PLAN D'OPTIMISATION : une action chiffrée par bien transmissible (démembrement
   // maintenant vs succession), classées par € économisés. Les biens « À garder » (🔒)
   // sont déjà exclus de `biens`.
+  // L'abattement et les tranches basses ne servent qu'UNE fois pour l'ensemble des biens :
+  // on calcule les droits sur la SOMME des bases (maintenant vs succession), puis on ventile
+  // l'économie entre les biens au prorata de leur économie isolée.
   const planActions = [];
-  biens.forEach((b) => {
-    const r = arbitrageDemembrement(b, { revaloPct: 2, esperance: espDefaut, ageParent: b.ageUsufruitierAujourdhui, nbParents, nbEnfants, abattParEnfantNow, abattParEnfantSucc: abattementMoyenADate(state, Math.max(0, espDefaut - b.ageUsufruitierAujourdhui)), fractionAOffrir: 1 });
-    const eco = Math.max(0, r.succession.droits - r.maintenant.droits);
+  const arbs = biens.map((b) => ({ b, abSucc: abattementMoyenADate(state, Math.max(0, espDefaut - b.ageUsufruitierAujourdhui)), r: arbitrageDemembrement(b, { revaloPct: 2, esperance: espDefaut, ageParent: b.ageUsufruitierAujourdhui, nbParents, nbEnfants, abattParEnfantNow, abattParEnfantSucc: abattementMoyenADate(state, Math.max(0, espDefaut - b.ageUsufruitierAujourdhui)), fractionAOffrir: 1 }) }));
+  const abSuccMin = arbs.length ? Math.min(...arbs.map((x) => x.abSucc)) : 0;
+  const droitsNowTot = droitsLD(arbs.reduce((s, x) => s + x.r.maintenant.base, 0), abattParEnfantNow, nbEnfants);
+  const droitsSuccTot = droitsLD(arbs.reduce((s, x) => s + x.r.succession.base, 0), abSuccMin, nbEnfants);
+  const ecoGlobale = Math.max(0, droitsSuccTot - droitsNowTot);
+  const ecoIsol = arbs.map((x) => Math.max(0, x.r.succession.droits - x.r.maintenant.droits));
+  const ecoIsolTot = ecoIsol.reduce((s, v) => s + v, 0);
+  arbs.forEach((x, i) => {
+    const eco = ecoIsolTot > 0 ? ecoGlobale * ecoIsol[i] / ecoIsolTot : 0;
     if (eco > 0) planActions.push({
-      titre: `Démembrer « ${b.libelle} » maintenant`,
-      detail: `Donner la nue-propriété (garder l'usufruit + contrôle) : <b>${eur2(r.maintenant.droits)}</b> de droits aujourd'hui contre <b>${eur2(r.succession.droits)}</b> à la succession.`,
+      titre: `Démembrer « ${x.b.libelle} » maintenant`,
+      detail: `Donner la nue-propriété (garder l'usufruit + contrôle). Base taxable : <b>${eur2(x.r.maintenant.base)}</b> aujourd'hui (nue-propriété) contre <b>${eur2(x.r.succession.base)}</b> à la succession (pleine propriété revalorisée). Économie calculée sur l'ensemble des biens : l'abattement ne sert qu'une fois.`,
       economie: eco,
     });
   });
