@@ -3,12 +3,12 @@ import {
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
   dansRappel, finRappel, rappelFiscal, droitsAvecRappel,
-} from "./data.js?v=114";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=114";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=114";
-import { droitsLD, arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=114";
-import * as sync from "./sync.js?v=114";
-import { askAI } from "./ai.js?v=114";
+} from "./data.js?v=115";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=115";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=115";
+import { droitsLD, arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=115";
+import * as sync from "./sync.js?v=115";
+import { askAI } from "./ai.js?v=115";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -889,35 +889,46 @@ async function renderOrganigramme() {
       }).join("")}</div></div>`;
   }
 
-  // ---- ⑦ter L'assurance-vie permet-elle de PAYER les droits ? (trésorerie, par ordre de décès) ----
-  // Les droits de succession se paient dans les 6 mois, en cash. L'AV est la seule liquidité
-  // garantie hors succession : on compare, à CHAQUE décès, ce que l'enfant doit payer
-  // (succession + 990 I) à ce qu'il encaisse en AV ce jour-là.
+  // ---- ⑦ter L'assurance-vie couvre-t-elle les droits ? Matrice scénarios × enfants ----
+  // 3 scénarios (chaque parent d'abord + décès simultanés), même régime. Par enfant :
+  // droits TOTAUX (2 décès, succession + 990 I) vs AV encaissée (+ AV reçue par le conjoint,
+  // retrouvée en cash dans sa succession), % couvert, et le TROU au 1er décès (timing).
   let avTresoCard = "";
   if (parents.length && enfants.length) {
-    const ordres = parents.map((par) => ({ par, s: simulerDeces(state, par.id) })).filter((o) => o.s);
-    const etape = (rowsSucc, av990, cash, cashSucc = 0) => enfants.map((e) => {
+    const etape = (rowsSucc, av990, cash, cashSucc = 0) => Object.fromEntries(enfants.map((e) => {
       const ds = (rowsSucc.find((r) => r.nom === e.nom) || {}).droits || 0;
       const da = (av990.find((r) => r.nom === e.nom) || {}).droits || 0;
-      const enc = ((cash || {})[e.id] || 0) + cashSucc / enfants.length;
-      return { nom: e.nom, droits: ds + da, encaisse: enc, net: enc - da, manque: Math.max(0, ds + da - enc) };
-    });
-    let pireManque = 0, manque1er = 0;
-    const blocs = ordres.map(({ par, s }) => {
+      return [e.id, { droits: ds + da, av: ((cash || {})[e.id] || 0) + cashSucc / enfants.length }];
+    }));
+    const scen = [
+      ...parents.map((par) => ({ titre: parents.length > 1 ? `${par.nom} décède en premier` : `Décès de ${par.nom}`, s: simulerDeces(state, par.id) })),
+      ...(parents.length > 1 ? [{ titre: "Décès simultanés (accident)", simult: true, s: simulerDeces(state, parents[0].id, { simultane: true }) }] : []),
+    ].filter((x) => x.s).map(({ titre, s, simult }) => {
       const e1 = etape(s.premierDeces.partEnfants || [], s.premierDeces.av990 || [], s.premierDeces.avCash);
-      const e2 = s.conjoint ? etape(s.secondDeces.parEnfant || [], s.secondDeces.avDenouees || [], s.secondDeces.avCash, s.secondDeces.avRecueConjoint || 0) : [];
-      const m1 = e1.reduce((x, r) => x + r.manque, 0), m2 = e2.reduce((x, r) => x + r.manque, 0);
-      pireManque = Math.max(pireManque, m1 + m2); manque1er = Math.max(manque1er, m1);
-      const tab = (titre, rows) => `<h3 style="margin:12px 0 6px">${titre}</h3><div class="table-wrap"><table class="grid2">
-        <thead><tr><th>Enfant</th><th class="num">Droits à payer (succession + AV)</th><th class="num">AV encaissée ce jour-là${titre.startsWith("2") ? "<br><small>(+ AV reçue par le conjoint au 1ᵉʳ décès)</small>" : ""}</th><th class="num">Reste à financer</th></tr></thead>
-        <tbody>${rows.map((r) => `<tr><td>${r.nom}</td><td class="num">${eur(r.droits)}</td><td class="num">${eur(r.encaisse)}</td><td class="num ${r.manque > 0 ? "droits" : "net"}"><b>${r.manque > 0 ? eur(r.manque) : "✓ couvert"}</b></td></tr>`).join("")}</tbody></table></div>`;
-      return `<details class="faq-q"${par === parents[0] ? " open" : ""}><summary>Si ${par.nom} décède en premier <span class="faq-v">reste à financer : ${eur(m1 + m2)}</span></summary><div class="faq-a">
-        ${tab(`1ᵉʳ décès (${par.nom})`, e1)}${s.conjoint ? tab(`2ᵈ décès (${s.conjoint.nom})`, e2) : ""}</div></details>`;
-    }).join("");
+      const e2 = s.conjoint ? etape(s.secondDeces.parEnfant || [], s.secondDeces.avDenouees || [], s.secondDeces.avCash, s.secondDeces.avRecueConjoint || 0) : {};
+      const cells = enfants.map((e) => {
+        const a = e1[e.id], b = e2[e.id] || { droits: 0, av: 0 };
+        const droits = a.droits + b.droits, av = a.av + b.av;
+        return { droits, av, couv: droits > 0 ? Math.min(1, av / droits) : 1, trou1: simult ? 0 : Math.max(0, a.droits - a.av) };
+      });
+      return { titre, s, cells };
+    });
+    const cell = (c) => {
+      const pc = Math.round(c.couv * 100), ok = c.couv >= 0.999;
+      return `<td style="vertical-align:top;min-width:150px">
+        <div class="small">Droits <b class="num">${eur(c.droits)}</b></div>
+        <div class="small">AV reçue <b class="num">${eur(c.av)}</b></div>
+        <div style="margin:4px 0"><span class="badge ${ok ? "ok" : pc >= 50 ? "warn" : ""}" ${!ok && pc < 50 ? 'style="background:#ffe0dd;color:#b42318;border-color:#f3b8b0"' : ""}>${ok ? "✓ couvert" : pc + " % couvert"}</span></div>
+        ${!ok ? `<div class="small" style="color:var(--danger)">manque ${eur(c.droits - c.av)}</div>` : ""}
+        ${c.trou1 > 0 ? `<div class="small muted">⏱️ au 1ᵉʳ décès : ${eur(c.trou1)} à trouver sans AV</div>` : ""}
+      </td>`;
+    };
+    const pire = Math.max(0, ...scen.map((x) => x.cells.reduce((t, c) => t + Math.max(0, c.droits - c.av), 0)));
+    const regLbl = REGIME_LABEL[state.regime || ""] || "non précisé";
     // Pistes chiffrées
     const pistes = [];
     const avConjoint = (state.av || []).filter((a) => a.clauseType === "conjoint_defaut_enfants" && Number(a.montant) > 0);
-    if (manque1er > 0 && avConjoint.length)
+    if (avConjoint.length)
       pistes.push(`<b>Clause « conjoint, à défaut enfants »</b> (${avConjoint.map((a) => a.libelle || a.id).join(", ")}) : au 1ᵉʳ décès, tout part au conjoint et les enfants ne touchent rien, alors qu'ils doivent déjà payer sur la succession du défunt. → Désigner les <b>enfants directement pour une partie</b> du contrat (jusqu'à 152 500 € par enfant <b>sans droits</b>), le reste au conjoint ; ou une <b>clause démembrée</b> (conjoint usufruitier, enfants nus-propriétaires), qui protège le conjoint mais ne donne pas de cash aux enfants.`);
     const ageP = (p) => ageDe(p);
     parents.forEach((p) => {
@@ -937,9 +948,18 @@ async function renderOrganigramme() {
     });
     pistes.push(`Autres sources de cash : liquidités/titres de la succession elle-même, <b>paiement fractionné</b> (3 ans) ou <b>différé</b> des droits sur la nue-propriété (art. 397 A ann. III), ou <b>remboursement du compte courant</b> par la SCI aux héritiers.`);
     avTresoCard = `<div class="card">
-      <div class="section-head"><div><h2>💧 L'assurance-vie suffit-elle à payer les droits ?</h2><div class="small muted">Les droits se paient <b>dans les 6 mois</b>, en cash. À chaque décès, on compare ce que chaque enfant doit payer à ce qu'il <b>encaisse en assurance-vie ce jour-là</b> (hors succession, versée en quelques semaines).</div></div>
-      <span class="badge ${pireManque > 0 ? "warn" : "ok"}">${pireManque > 0 ? "Manque jusqu'à " + eur(pireManque) : "Droits couverts"}</span></div>
-      ${blocs}
+      <div class="section-head"><div><h2>💧 L'assurance-vie couvre-t-elle les droits de chaque enfant ?</h2>
+        <div class="small muted">Régime : <b>${regLbl}</b>. Pour chaque scénario, total sur les <b>deux décès</b> : droits à payer par l'enfant (succession + AV) face à l'assurance-vie qu'il encaisse. ⏱️ = argent à trouver au 1ᵉʳ décès, quand l'AV part au conjoint.</div></div>
+        <span class="badge ${pire > 0 ? "warn" : "ok"}">${pire > 0 ? "Manque jusqu'à " + eur(pire) : "Droits couverts partout"}</span></div>
+      <div class="table-wrap"><table class="grid2">
+        <thead><tr><th>Scénario</th>${enfants.map((e) => `<th>${e.nom}</th>`).join("")}<th>Total enfants</th></tr></thead>
+        <tbody>${scen.map((x) => {
+          const t = x.cells.reduce((o, c) => ({ droits: o.droits + c.droits, av: o.av + c.av, trou1: o.trou1 + c.trou1 }), { droits: 0, av: 0, trou1: 0 });
+          t.couv = t.droits > 0 ? Math.min(1, t.av / t.droits) : 1;
+          return `<tr><td style="vertical-align:top"><b>${x.titre}</b></td>${x.cells.map(cell).join("")}${cell(t)}</tr>`;
+        }).join("")}</tbody>
+      </table></div>
+      <p class="small muted" style="margin-top:8px">« AV reçue » = contrats dont l'enfant est bénéficiaire + sa part de l'AV que le conjoint a touchée au 1ᵉʳ décès (supposée encore en compte au 2ᵈ). Droits = succession (barème, abattements, donations &lt; 15 ans) + 990 I.</p>
       <h3 style="margin-top:14px">Que modifier ?</h3>
       <ul class="small">${pistes.map((t) => `<li style="margin-bottom:6px">${t}</li>`).join("")}</ul>
     </div>`;

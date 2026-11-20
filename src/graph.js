@@ -1,7 +1,7 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit, dansRappel, rappelFiscal, droitsAvecRappel } from "./data.js?v=114";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit, dansRappel, rappelFiscal, droitsAvecRappel } from "./data.js?v=115";
 
 // Année de naissance : la DATE complète prime (plus précise), puis année seule, puis âge
 function birthYear(p) {
@@ -649,7 +649,8 @@ export function actifsTransmissiblesParents(state) {
 // Estime le coût fiscal selon QUEL parent décède en premier, puis le conjoint « demain ».
 // v1 : hypothèses simplificatrices EXPLICITES (champ `hypothese`), à valider avec un notaire.
 // Réutilise debrief() pour les agrégats + calculDroits()/barèmes de data.js.
-export function simulerDeces(state, defuntId) {
+export function simulerDeces(state, defuntId, opts = {}) {
+  const simultane = !!opts.simultane; // décès simultanés : pas de conjoint survivant
   const D = debrief(state);
   const personnes = state.personnes || [];
   const parents = personnes.filter((p) => p.role === "parent");
@@ -703,7 +704,7 @@ export function simulerDeces(state, defuntId) {
 
   // Le conjoint bénéficiaire est exonéré (TEPA) : clause « conjoint à défaut enfants » s'il est
   // VIVANT au dénouement, ou conjoint désigné nommément. Au 2d décès, la clause bascule sur les enfants.
-  const goesToConjoint = (a) => (a.clauseType || "designe") === "conjoint_defaut_enfants" && conjoint;
+  const goesToConjoint = (a) => (a.clauseType || "designe") === "conjoint_defaut_enfants" && conjoint && !simultane;
   const isParent = (id) => parents.some((p) => p.id === id);
   // Ventile un jeu de contrats : capital par (assuré|bénéficiaire) en 990 I, assiette 757 B par assuré,
   // et ce qui part au CONJOINT survivant (exonéré, mais entre dans SON patrimoine).
@@ -744,17 +745,26 @@ export function simulerDeces(state, defuntId) {
   const contrats2 = av.filter((a) => (conjoint && a.souscripteurId === conjoint.id && !a.cosouscripteurId) || a.cosouscripteurId);
 
   // 1er décès (conjoint VIVANT → ce qui lui revient est exonéré)
-  const v1 = ventiler(contrats1, !!conjoint);
+  if (simultane && conjoint) {
+    // Comourants : la clause d'attribution / « conjoint d'abord » ne joue pas — chaque parent
+    // transmet SA part directement aux enfants (régime communautaire : moitié chacun).
+    attribution = false;
+    if (regime === "universelle" || regime === "universelle_attribution") { masseBiens1 = patrimoineTaxable * 0.5; masseBiens2 = patrimoineTaxable * 0.5; }
+    else { masseBiens1 = masseDe(defuntId); masseBiens2 = masseDe(conjoint.id); }
+    hypothese = "Décès simultanés : aucun conjoint survivant — chaque parent transmet sa part directement aux enfants (2 abattements), les AV « conjoint à défaut enfants » vont directement aux enfants." + demembreNote;
+  }
+  const spouseAlive1 = !!conjoint && !simultane;
+  const v1 = ventiler(contrats1, spouseAlive1);
   const enf1 = partEnfants(masseBiens1, defuntId, v1.reint);
   const av1 = v1.av990;
   const droitsAV1 = av1.reduce((s, x) => s + x.droits, 0);
-  const avDenouees1 = contrats1.filter((a) => avAvant70Effectif(a, personnes) && !goesToConjoint(a)).map((a) => ({ contrat: a.libelle || a.id, beneficiaires: ventiler([a], !!conjoint).av990 }));
+  const avDenouees1 = contrats1.filter((a) => avAvant70Effectif(a, personnes) && !goesToConjoint(a)).map((a) => ({ contrat: a.libelle || a.id, beneficiaires: ventiler([a], spouseAlive1).av990 }));
   const totalDroitsPremier = enf1.total + droitsAV1;
   const abattementsPerdus = attribution ? ABATTEMENTS.enfant * enfants.length : 0;
 
   // 2d décès : l'AV reçue par le conjoint au 1er décès est désormais dans SON patrimoine
   // (hypothèse : conservée jusqu'à son décès) → taxée au barème succession.
-  const avRecueConjoint = conjoint ? v1.versConjoint : 0;
+  const avRecueConjoint = conjoint && !simultane ? v1.versConjoint : 0;
   const v2 = ventiler(contrats2, false);
   const enf2 = conjoint ? partEnfants(masseBiens2 + avRecueConjoint, conjoint.id, v2.reint) : { rows: [], total: 0 };
   const av2 = conjoint ? v2.av990 : [];
