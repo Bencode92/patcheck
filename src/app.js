@@ -3,12 +3,12 @@ import {
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
   dansRappel, finRappel, rappelFiscal, droitsAvecRappel,
-} from "./data.js?v=111";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=111";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=111";
-import { droitsLD, arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=111";
-import * as sync from "./sync.js?v=111";
-import { askAI } from "./ai.js?v=111";
+} from "./data.js?v=112";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=112";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=112";
+import { droitsLD, arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=112";
+import * as sync from "./sync.js?v=112";
+import { askAI } from "./ai.js?v=112";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -334,8 +334,8 @@ function exporterResume(excludeEnt = false) {
   // Endettement
   if ((S.dettes || []).length) {
     push("");
-    push("DETTES / ENDETTEMENT", "Montant dû", "Adossé à");
-    (S.dettes || []).forEach((x) => push(x.libelle || "Emprunt", euro(x.montant), nameOf(x.cible)));
+    push("DETTES / ENDETTEMENT", "Montant dû", "Adossé à", "Prêteur");
+    (S.dettes || []).forEach((x) => push(x.libelle || "Emprunt", euro(x.montant), nameOf(x.cible), x.creancierId ? "Compte courant " + nameOf(x.creancierId) + (x.creanceNP ? " (NP donnée)" : "") : "Banque"));
     push("TOTAL DETTES", euro(d.totalDettes), "");
   }
   push("");
@@ -563,8 +563,8 @@ async function renderOrganigramme() {
 
   // ---- ② Répartition miroir (2 parents) ----
   const catKey = (cat) => (cat === "sci" ? "immobilier" : cat);
-  const MIRLBL = { immobilier: "🏠 Immobilier (dont SCI)", entreprise: "🏭 Entreprise", titres: "📈 Titres", liquidites: "💰 Liquidités", capitalisation: "🏦 Contrat de capitalisation", av: "🛡️ Assurance-vie" };
-  const MIRORDER = ["immobilier", "entreprise", "titres", "liquidites", "capitalisation", "av"];
+  const MIRLBL = { immobilier: "🏠 Immobilier (dont SCI)", entreprise: "🏭 Entreprise", titres: "📈 Titres", liquidites: "💰 Liquidités", capitalisation: "🏦 Contrat de capitalisation", creance: "💼 Compte courant (créance)", av: "🛡️ Assurance-vie" };
+  const MIRORDER = ["immobilier", "entreprise", "titres", "liquidites", "capitalisation", "creance", "av"];
   const parentCat = (p) => {
     const m = {};
     (d.parPersonneDetail[p.id] || []).forEach((it) => { const k = catKey(it.categorie); m[k] = (m[k] || 0) + it.valeur; });
@@ -702,8 +702,8 @@ async function renderOrganigramme() {
   // ---- ⑤ Fiche de synthèse ----
   // Chaque ligne se déplie : on voit bien par bien ce qui est compté (propriétaire,
   // part, droit PP/US/NP, fraction 669, valeur retenue) et ce qui est EXCLU et pourquoi.
-  const LBL = { immobilier: "🏠 Immobilier", sci: "🏢 SCI", entreprise: `🏭 Entreprise détenue${d.exonerationDutreil > 0 ? " (après Dutreil −75 %)" : ""}`, liquidites: "💰 Liquidités", titres: "📈 Titres", capitalisation: "🏦 Contrat de capitalisation", autre: "Autre", av_apres70: "🛡️ AV après 70 ans réintégrée", dette: "💳 Dette" };
-  const CAT_COURT = { immobilier: "🏠 Immobilier", sci: "🏢 SCI", entreprise: "🏭 Entreprise", liquidites: "💰 Liquidités", titres: "📈 Titres", capitalisation: "🏦 Capitalisation", autre: "Autre", dette: "💳 Dette" };
+  const LBL = { creance: "💼 Compte courant (créance)", immobilier: "🏠 Immobilier", sci: "🏢 SCI", entreprise: `🏭 Entreprise détenue${d.exonerationDutreil > 0 ? " (après Dutreil −75 %)" : ""}`, liquidites: "💰 Liquidités", titres: "📈 Titres", capitalisation: "🏦 Contrat de capitalisation", autre: "Autre", av_apres70: "🛡️ AV après 70 ans réintégrée", dette: "💳 Dette" };
+  const CAT_COURT = { creance: "💼 Compte courant", immobilier: "🏠 Immobilier", sci: "🏢 SCI", entreprise: "🏭 Entreprise", liquidites: "💰 Liquidités", titres: "📈 Titres", capitalisation: "🏦 Capitalisation", autre: "Autre", dette: "💳 Dette" };
   const pc = (x) => (Math.round(x * 100) / 100).toLocaleString("fr-FR") + " %";
   const droitTxt = (l) => l.droit === "PP" || !l.droit ? (l.droit || "") : `${l.droit} × ${pct(l.fraction)}`;
   const tabLignes = (ls, opts = {}) => ls.length ? `<div class="table-wrap"><table class="grid2 det-tab">
@@ -783,7 +783,7 @@ async function renderOrganigramme() {
     const tauxMoyen = B > 0 ? T / B : 0;
 
     // Q2 : ce qui coûte le plus — par catégorie puis par bien
-    const LBLc = { immobilier: "🏠 Immobilier", sci: "🏢 SCI", entreprise: "🏭 Entreprise (après Dutreil)", liquidites: "💰 Liquidités", titres: "📈 Titres", capitalisation: "🏦 Capitalisation", autre: "Autre", av_apres70: "🛡️ AV après 70 ans" };
+    const LBLc = { creance: "💼 Compte courant (créance)", immobilier: "🏠 Immobilier", sci: "🏢 SCI", entreprise: "🏭 Entreprise (après Dutreil)", liquidites: "💰 Liquidités", titres: "📈 Titres", capitalisation: "🏦 Capitalisation", autre: "Autre", av_apres70: "🛡️ AV après 70 ans" };
     const catsQ = Object.entries(d.taxableParCategorie || {}).filter(([, v]) => v > 0.5).sort((a, b) => b[1] - a[1]);
     const parBien = {};
     (d.taxableLignes || []).forEach((l) => { const k = l.libelle; parBien[k] = parBien[k] || { libelle: k, categorie: l.categorie, valeur: 0 }; parBien[k].valeur += l.valeur; });
@@ -1289,8 +1289,14 @@ function renderPatrimoine() {
           <div class="mini-row">
             <input class="xx_lib" data-xi="${i}" value="${x.libelle || ""}" placeholder="ex : Crédit ${a.libelle || "ce bien"}">
             <input class="xx_val" data-xi="${i}" inputmode="numeric" value="${x.montant || ""}" placeholder="Capital restant dû €">
+            <select class="xx_cred" data-xi="${i}" title="Qui a prêté ?">${opt([["", "🏦 Banque"], ...state.personnes.map((p) => [p.id, "👤 Compte courant de " + p.nom])], x.creancierId || "")}</select>
             <button class="danger-link" data-del="dette" data-xi="${i}">✕</button>
-          </div>`).join("") || `<div class="muted small">Aucune dette sur ce bien.</div>`}
+          </div>
+          ${x.creancierId ? `<div class="mini-row muted small" style="margin:-2px 0 8px 4px;flex-wrap:wrap">
+            <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" class="xx_np" data-xi="${i}" ${x.creanceNP ? "checked" : ""}> Nue-propriété de ce compte courant déjà donnée aux enfants</label>
+            ${x.creanceNP ? `<label style="display:flex;gap:6px;align-items:center">année <input class="xx_npyr" data-xi="${i}" type="number" min="1990" max="${yr}" value="${x.creanceNPAnnee ?? ""}" placeholder="ex : 2026" style="max-width:90px"></label>` : ""}
+            <div style="flex-basis:100%">${x.creanceNP ? "✅ Usufruit du prêteur : s'éteint au décès sans droits (art. 1133)." : "⚠️ Baisse la valeur des parts de ce bien, mais <b>entre à 100 % dans la succession du prêteur</b> (créance)."}</div>
+          </div>` : ""}`).join("") || `<div class="muted small">Aucune dette sur ce bien.</div>`}
         <button class="btn small" data-add="dette" data-ai="${ai}">+ dette sur ce bien</button>
       </div>
 
@@ -1426,6 +1432,13 @@ function renderPatrimoine() {
       else if (t.classList.contains("f_dut")) { a.dutreil = t.checked; save(); }
       else if (t.classList.contains("f_rp")) { a.residencePrincipale = t.checked; save(); }
       else if (t.classList.contains("f_demyr")) renderPatrimoine(); // retire l'alerte « année manquante »
+    } else if (t.dataset.xi != null) {
+      const x = X[+t.dataset.xi];
+      if (t.classList.contains("xx_cred")) { if (t.value) x.creancierId = t.value; else { delete x.creancierId; delete x.creanceNP; delete x.creanceNPAnnee; } }
+      else if (t.classList.contains("xx_np")) { x.creanceNP = t.checked; if (t.checked && !x.creanceNPAnnee) x.creanceNPAnnee = new Date().getFullYear(); }
+      else if (t.classList.contains("xx_npyr")) x.creanceNPAnnee = t.value === "" ? null : Number(t.value);
+      else return;
+      save(); renderPatrimoine();
     } else if (t.dataset.di != null) {
       const d = D[+t.dataset.di];
       if (t.classList.contains("dd_prop")) d.proprietaire = t.value;
@@ -2210,13 +2223,13 @@ function renderRepartition() {
   //  - OUI : immobilier, SCI (parts), contrat de capitalisation → donation démembrée possible.
   //  - NON : PEA / PER / livrets / Article 83 (individuels → transmis AU DÉCÈS, pas partageables).
   //  - Entreprise : gérée à part (Dutreil, gouvernance).
-  const PARTAGEABLES = new Set(["immobilier", "sci", "capitalisation"]);
+  const PARTAGEABLES = new Set(["immobilier", "sci", "capitalisation", "creance"]);
   const biensRepartir = biensTransm.filter((b) => PARTAGEABLES.has(b.categorie));
   const entrepriseAPart = biensTransm.filter((b) => b.categorie === "entreprise");
   const placementsIndiv = biensTransm.filter((b) => !PARTAGEABLES.has(b.categorie) && b.categorie !== "entreprise"); // titres, liquidités…
 
   // ---- ① Vue d'ensemble : patrimoine par catégorie (net) ----
-  const CATLBL = { immobilier: "🏠 Immobilier", sci: "🏢 SCI", entreprise: "🏭 Entreprise", titres: "📈 Titres / placements", liquidites: "💶 Liquidités", capitalisation: "🏦 Contrat de capitalisation", autre: "Autre" };
+  const CATLBL = { immobilier: "🏠 Immobilier", sci: "🏢 SCI", entreprise: "🏭 Entreprise", titres: "📈 Titres / placements", liquidites: "💶 Liquidités", capitalisation: "🏦 Contrat de capitalisation", creance: "💼 Compte courant (créance)", autre: "Autre" };
   const avTotal = (d.avAvant70 || 0) + (d.avApres70 || 0);
   const parCat = { ...(d.parCategorie || {}) };
   const catRows = Object.entries(parCat).filter(([, v]) => v > 0.5).sort((a, b) => b[1] - a[1]);

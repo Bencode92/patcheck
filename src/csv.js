@@ -84,8 +84,8 @@ export function stateToCSV(state) {
   section("DETENTIONS", ["detenteur", "detenteur_id", "actif", "actif_id", "part_pct", "droit"],
     (state.detentions || []).map((d) => [nameOf(d.proprietaire), d.proprietaire, nameOf(d.actifRef), d.actifRef, d.part, d.droit]));
 
-  section("DETTES", ["id", "libelle", "montant", "adosse_a", "adosse_a_id"],
-    (state.dettes || []).map((x) => [x.id, x.libelle, x.montant, nameOf(x.cible), x.cible]));
+  section("DETTES", ["id", "libelle", "montant", "adosse_a", "adosse_a_id", "creancier_id", "creance_np_annee"],
+    (state.dettes || []).map((x) => [x.id, x.libelle, x.montant, nameOf(x.cible), x.cible, x.creancierId || "", x.creanceNP ? x.creanceNPAnnee || "oui" : ""]));
 
   section("DONATIONS", ["donateur", "donateur_id", "beneficiaire", "beneficiaire_id", "date", "montant", "note", "nature"],
     (state.donations || []).map((d) => [nameOf(d.donateurId), d.donateurId, nameOf(d.beneficiaireId), d.beneficiaireId, d.date, d.montant, d.note || "", d.nature || "pleine"]));
@@ -176,7 +176,12 @@ function csvToStateSectioned(rows) {
       st.detentions.push({ proprietaire: prop, actifRef: act, part: num(col(r, "part_pct")), droit: (col(r, "droit") || "PP").toUpperCase() });
     } else if (section.startsWith("DETTE")) {
       const cible = col(r, "adosse_a_id") || resolve(col(r, "adosse_a"), actByName) || resolve(col(r, "adosse_a"), persByName) || col(r, "adosse_a");
-      st.dettes.push({ id: col(r, "id") || uid(), libelle: col(r, "libelle"), montant: num(col(r, "montant")), cible });
+      const x = { id: col(r, "id") || uid(), libelle: col(r, "libelle"), montant: num(col(r, "montant")), cible };
+      const cred = col(r, "creancier_id") || resolve(col(r, "creancier"), persByName);
+      if (cred) x.creancierId = cred;
+      const np = col(r, "creance_np_annee");
+      if (cred && np) { x.creanceNP = true; if (/^\d{4}$/.test(np)) x.creanceNPAnnee = Number(np); }
+      st.dettes.push(x);
     } else if (section.startsWith("DONATION")) {
       const don = col(r, "donateur_id") || resolve(col(r, "donateur"), persByName) || col(r, "donateur");
       const ben = col(r, "beneficiaire_id") || resolve(col(r, "beneficiaire"), persByName) || col(r, "beneficiaire");

@@ -1,7 +1,7 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit, dansRappel, rappelFiscal, droitsAvecRappel } from "./data.js?v=111";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit, dansRappel, rappelFiscal, droitsAvecRappel } from "./data.js?v=112";
 
 // Année de naissance : la DATE complète prime (plus précise), puis année seule, puis âge
 function birthYear(p) {
@@ -110,6 +110,7 @@ export function buildMermaid(state) {
   (state.dettes || []).forEach((x) => {
     L.push(`  ${x.id}>"💳 ${clean(x.libelle)}<br/><b>− ${eur0(x.montant)}</b>"]:::dette`);
     if (x.cible) L.push(`  ${x.id} -.->|dette| ${x.cible}`);
+    if (x.creancierId) L.push(`  ${x.creancierId} -.->|"prête (CCA)"| ${x.id}`);
   });
 
   // Donations (arêtes épaisses avec montant + date)
@@ -133,8 +134,33 @@ export function buildMermaid(state) {
   return L.join("\n");
 }
 
+// ------------------- Comptes courants d'associé / prêts familiaux -------------------
+// Une dette dont le PRÊTEUR est une personne (x.creancierId) est AUSSI une créance de ce
+// prêteur : elle baisse la valeur nette du bien emprunteur (SCI) ET entre à sa valeur
+// nominale dans le patrimoine — donc la succession — du prêteur. Nue-propriété de la
+// créance donnée aux enfants (x.creanceNP) → prêteur usufruitier, enfants NP : au décès
+// l'usufruit s'éteint sans droits (art. 1133). Actifs/détentions SYNTHÉTIQUES (non sauvés).
+export function avecCreances(state) {
+  const personnes = state.personnes || [];
+  const prets = (state.dettes || []).filter((x) => x.creancierId && personnes.some((p) => p.id === x.creancierId) && Number(x.montant) > 0);
+  if (!prets.length) return state;
+  const enfants = personnes.filter((p) => p.role === "enfant");
+  const actifs = [...(state.actifs || [])], detentions = [...(state.detentions || [])];
+  prets.forEach((x) => {
+    const cible = (state.actifs || []).find((a) => a.id === x.cible);
+    const id = "cca_" + x.id;
+    actifs.push({ id, libelle: x.libelle || ("Compte courant " + (cible ? cible.libelle || cible.id : "")), categorie: "creance", valeur: Number(x.montant) || 0, demembrementAnnee: x.creanceNP ? x.creanceNPAnnee || null : null, emprunteur: x.cible, synthetique: true });
+    if (x.creanceNP && enfants.length) {
+      detentions.push({ proprietaire: x.creancierId, actifRef: id, part: 100, droit: "US" });
+      enfants.forEach((e) => detentions.push({ proprietaire: e.id, actifRef: id, part: 100 / enfants.length, droit: "NP" }));
+    } else detentions.push({ proprietaire: x.creancierId, actifRef: id, part: 100, droit: "PP" });
+  });
+  return { ...state, actifs, detentions };
+}
+
 // ------------------- Débrief chiffré -------------------
 export function debrief(state) {
+  state = avecCreances(state);
   const personnes = state.personnes;
   const actifs = state.actifs || [];
   const detentions = state.detentions || [];
@@ -489,9 +515,16 @@ export function debrief(state) {
     if (reste > 0 && reste < 2)
       reco.push({ level: "info", text: `La donation de ${eur(d.montant)} (${new Date(d.date).getFullYear()}) sort du rappel fiscal dans ${reste.toFixed(1)} an(s) : l'abattement correspondant se rechargera alors.` });
   });
-  // Dettes déductibles
-  if (totalDettes > 0)
-    reco.push({ level: "ok", text: `<b>${eur(totalDettes)}</b> de dettes réduisent l'assiette taxable (levier classique : porter l'emprunt dans la SCI/société abaisse la valeur nette transmise).` });
+  // Dettes déductibles (bancaires) vs comptes courants familiaux (neutres, voire pénalisants)
+  const detteBanque = dettes.filter((x) => !x.creancierId).reduce((s, x) => s + (Number(x.montant) || 0), 0);
+  if (detteBanque > 0)
+    reco.push({ level: "ok", text: `<b>${eur(detteBanque)}</b> de dettes bancaires réduisent l'assiette taxable (levier classique : porter l'emprunt dans la SCI/société abaisse la valeur nette transmise).` });
+  dettes.filter((x) => x.creancierId).forEach((x) => {
+    const pr = personnes.find((p) => p.id === x.creancierId);
+    if (!pr || pr.role !== "parent") return;
+    if (x.creanceNP) reco.push({ level: "ok", text: `Compte courant de ${pr.nom} (${eur(x.montant)}) : nue-propriété donnée aux enfants → l'usufruit s'éteint au décès <b>sans droits</b> (art. 1133).` });
+    else reco.push({ level: "warn", text: `Compte courant de ${pr.nom} (<b>${eur(x.montant)}</b>) : c'est une <b>créance taxée à 100 % dans sa succession</b>. Elle baisse la valeur des parts… déjà données en NP aux enfants : aucun gain. Pistes : <b>donner la nue-propriété du compte courant</b> (droits sur la NP seulement, puis extinction sans droits), le faire <b>rembourser par la SCI</b> au fil des loyers, ou l'<b>incorporer au capital</b> puis donner la NP des nouvelles parts.` });
+  });
   // Dutreil non activé sur du capital entreprise
   const entrepriseSansDutreil = actifs.filter((a) => a.categorie === "entreprise" && !a.dutreil);
   entrepriseSansDutreil.forEach((a) =>
@@ -547,13 +580,14 @@ export function debrief(state) {
 // (valeur marchande − dette adossée) × quote-part parents. Sert de base à
 // l'arbitrage démembrement (donner la nue-propriété). Réutilise le netting dette.
 export function actifsTransmissiblesParents(state) {
+  state = avecCreances(state);
   const personnes = state.personnes || [];
   const actifs = state.actifs || [];
   const detentions = state.detentions || [];
   const dettes = state.dettes || [];
   const parents = personnes.filter((p) => p.role === "parent");
   const parentIds = new Set(parents.map((p) => p.id));
-  const CATS = new Set(["sci", "immobilier", "entreprise", "titres", "capitalisation"]);
+  const CATS = new Set(["sci", "immobilier", "entreprise", "titres", "capitalisation", "creance"]);
   // Parts en % (gère les fractions saisies « 81/500 »)
   const partNum = (v) => {
     if (typeof v === "string" && v.includes("/")) { const [x, y] = v.split("/").map(Number); return y ? (x / y) * 100 : 0; }
