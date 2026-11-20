@@ -3,12 +3,12 @@ import {
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
   dansRappel, finRappel, rappelFiscal, droitsAvecRappel,
-} from "./data.js?v=112";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=112";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=112";
-import { droitsLD, arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=112";
-import * as sync from "./sync.js?v=112";
-import { askAI } from "./ai.js?v=112";
+} from "./data.js?v=113";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=113";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=113";
+import { droitsLD, arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=113";
+import * as sync from "./sync.js?v=113";
+import { askAI } from "./ai.js?v=113";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1222,6 +1222,24 @@ function renderPatrimoine() {
   const detenteursDe = (aid) => D.map((d, i) => ({ d, i })).filter((o) => o.d.actifRef === aid);
   const dettesDe = (aid) => X.map((x, i) => ({ x, i })).filter((o) => o.x.cible === aid);
 
+  // Récap brut → dettes → net d'un bien (recalculé en direct à la saisie)
+  const netBox = (a) => {
+    const brut = Number(a.valeur) || 0;
+    if (!brut) return "";
+    const ds = dettesDe(a.id).map((o) => o.x);
+    const banque = ds.filter((x) => !x.creancierId).reduce((s, x) => s + (Number(x.montant) || 0), 0);
+    const cca = ds.filter((x) => x.creancierId).reduce((s, x) => s + (Number(x.montant) || 0), 0);
+    const net = brut - banque - cca;
+    if (!banque && !cca) return `<div class="result" style="margin-top:10px"><div class="line"><span>Valeur brute</span><b>${eur(brut)}</b></div><div class="line"><span class="muted small">Aucune dette → valeur nette = valeur brute</span><b></b></div></div>`;
+    return `<div class="result" style="margin-top:10px">
+      <div class="line"><span>Valeur brute${a.categorie === "immobilier" ? " (marchande)" : ""}</span><b>${eur(brut)}</b></div>
+      ${banque ? `<div class="line"><span>− Emprunt bancaire (capital restant dû)</span><b style="color:var(--danger)">− ${eur(banque)}</b></div>` : ""}
+      ${cca ? `<div class="line"><span>− Comptes courants d'associés</span><b style="color:var(--danger)">− ${eur(cca)}</b></div>` : ""}
+      <div class="line total"><span>= Valeur nette de ce bien</span><b style="color:${net < 0 ? "var(--danger)" : "var(--accent-2)"}">${net < 0 ? "− " + eur(-net) : eur(net)}</b></div>
+      ${net < 0 ? `<div class="muted small" style="margin-top:6px">⚠️ Dettes &gt; valeur : les parts valent <b>0 €</b> dans les calculs (plancher). Les comptes courants restent comptés <b>à leur valeur nominale</b> chez le prêteur.</div>` : ""}
+    </div>`;
+  };
+
   const pvText = (a) => {
     const bits = [];
     if (a.categorie === "immobilier" && a.prixAcq && a.valeur) bits.push(`Plus-value latente : <b>${eur(a.valeur - a.prixAcq)}</b> (achat ${eur(a.prixAcq)} → marché ${eur(a.valeur)})`);
@@ -1300,16 +1318,7 @@ function renderPatrimoine() {
         <button class="btn small" data-add="dette" data-ai="${ai}">+ dette sur ce bien</button>
       </div>
 
-      ${(() => {
-        const brut = Number(a.valeur) || 0;
-        const dette = dettesDe(a.id).reduce((s, o) => s + (Number(o.x.montant) || 0), 0);
-        if (!brut) return "";
-        return `<div class="result" style="margin-top:10px">
-          <div class="line"><span>Valeur brute${a.categorie === "immobilier" ? " (marchande)" : ""}</span><b>${eur(brut)}</b></div>
-          ${dette ? `<div class="line"><span>− Dette (capital restant dû)</span><b style="color:var(--danger)">− ${eur(dette)}</b></div>
-          <div class="line total"><span>= Valeur nette de ce bien</span><b style="color:var(--accent-2)">${eur(brut - dette)}</b></div>` : `<div class="line"><span class="muted small">Aucune dette → valeur nette = valeur brute</span><b></b></div>`}
-        </div>`;
-      })()}
+      <div class="net-box" data-ai="${ai}">${netBox(a)}</div>
     </div>`;
 
   // Regroupement des biens par catégorie (repliables)
@@ -1411,6 +1420,8 @@ function renderPatrimoine() {
       if (t.classList.contains("f_val") || t.classList.contains("f_pxacq") || t.classList.contains("f_surface")) {
         const pv = c.querySelector(`.pv-line[data-ai="${ai}"]`);
         if (pv) pv.innerHTML = pvText(a);
+        const box = c.querySelector(`.net-box[data-ai="${ai}"]`);
+        if (box) box.innerHTML = netBox(a);
       }
       save();
     } else if (t.dataset.di != null && t.classList.contains("dd_part")) {
@@ -1418,7 +1429,11 @@ function renderPatrimoine() {
     } else if (t.dataset.xi != null) {
       const x = X[+t.dataset.xi];
       if (t.classList.contains("xx_lib")) x.libelle = t.value;
-      else if (t.classList.contains("xx_val")) x.montant = parseNum(t.value);
+      else if (t.classList.contains("xx_val")) {
+        x.montant = parseNum(t.value);
+        const ai = A.findIndex((a) => a.id === x.cible), box = c.querySelector(`.net-box[data-ai="${ai}"]`);
+        if (box) box.innerHTML = netBox(A[ai]);
+      }
       else return;
       save();
     }
