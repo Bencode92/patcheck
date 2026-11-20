@@ -1,7 +1,7 @@
 // =============================================================
 //  Organigramme (Mermaid) + Débrief patrimonial
 // =============================================================
-import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit, dansRappel, rappelFiscal, droitsAvecRappel } from "./data.js?v=113";
+import { ABATTEMENTS, DELAI_RAPPEL_ANS, AV_AVANT_70, AV_APRES_70, calculDroits, BAREME_LIGNE_DIRECTE, tauxUsufruit, dansRappel, rappelFiscal, droitsAvecRappel } from "./data.js?v=114";
 
 // Année de naissance : la DATE complète prime (plus précise), puis année seule, puis âge
 function birthYear(p) {
@@ -708,7 +708,7 @@ export function simulerDeces(state, defuntId) {
   // Ventile un jeu de contrats : capital par (assuré|bénéficiaire) en 990 I, assiette 757 B par assuré,
   // et ce qui part au CONJOINT survivant (exonéré, mais entre dans SON patrimoine).
   const ventiler = (contrats, spouseAlive) => {
-    const c990 = {}, p757 = {}; let versConjoint = 0;
+    const c990 = {}, p757 = {}, cash = {}; let versConjoint = 0; // cash : capital encaissé par bénéficiaire (trésorerie)
     contrats.forEach((a) => {
       const m = Number(a.montant) || 0; if (m <= 0) return;
       if (spouseAlive && goesToConjoint(a)) { versConjoint += m; return; }
@@ -716,6 +716,7 @@ export function simulerDeces(state, defuntId) {
       const av70 = avAvant70Effectif(a, personnes), assure = a.souscripteurId || "?";
       partsBenef(a).forEach(([b, sh]) => {
         if (isParent(b) && b !== a.souscripteurId) { if (spouseAlive) versConjoint += m * sh; return; }
+        cash[b] = (cash[b] || 0) + m * sh;
         if (av70) c990[assure + "|" + b] = (c990[assure + "|" + b] || 0) + m * sh;
         else { const x = (p757[assure] ||= { total: 0, parBenef: {} }); const v = assiette757B(a) * sh; x.total += v; x.parBenef[b] = (x.parBenef[b] || 0) + v; }
       });
@@ -735,7 +736,7 @@ export function simulerDeces(state, defuntId) {
       Object.entries(x.parBenef).forEach(([b, v]) => { reint[b] = (reint[b] || 0) + v * k; });
       reintTotal += reste;
     });
-    return { av990, reint, reintTotal, versConjoint };
+    return { av990, reint, reintTotal, versConjoint, cash };
   };
 
   // Contrats dénoués : au 1er décès ceux du défunt (hors co-adhésion) ; au 2d ceux du conjoint + toute co-adhésion
@@ -772,6 +773,8 @@ export function simulerDeces(state, defuntId) {
       droitsConjoint: 0,
       partEnfants: enf1.rows,
       avDenouees: avDenouees1,
+      av990: av1,
+      avCash: v1.cash,
       totalDroitsPremier,
       abattementsPerdus,
     },
@@ -780,6 +783,7 @@ export function simulerDeces(state, defuntId) {
       avRecueConjoint,
       parEnfant: enf2.rows,
       avDenouees: av2,
+      avCash: conjoint ? v2.cash : {},
       totalDroitsSecond,
     },
     totalOrdre: totalDroitsPremier + totalDroitsSecond,

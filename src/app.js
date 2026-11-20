@@ -3,12 +3,12 @@ import {
   BAREMES_PAR_LIEN, LIBELLE_LIEN, calculDroits, tauxUsufruit,
   BAREME_LIGNE_DIRECTE, BAREME_USUFRUIT, AV_AVANT_70, AV_APRES_70,
   dansRappel, finRappel, rappelFiscal, droitsAvecRappel,
-} from "./data.js?v=113";
-import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=113";
-import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=113";
-import { droitsLD, arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=113";
-import * as sync from "./sync.js?v=113";
-import { askAI } from "./ai.js?v=113";
+} from "./data.js?v=114";
+import { templateCSV, stateToCSV, csvToState } from "./csv.js?v=114";
+import { buildMermaid, debrief, simulerDeces, actifsTransmissiblesParents, avAvant70Effectif } from "./graph.js?v=114";
+import { droitsLD, arbitrageDemembrement, timingDonations, abattementMoyenADate, horizonRechargePleine, avParAssureEnfant, comparerCapitalisation, droits990, comparerVehicules, simulerIndivision } from "./optim.js?v=114";
+import * as sync from "./sync.js?v=114";
+import { askAI } from "./ai.js?v=114";
 
 // ---------- Utilitaires ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -889,6 +889,62 @@ async function renderOrganigramme() {
       }).join("")}</div></div>`;
   }
 
+  // ---- ⑦ter L'assurance-vie permet-elle de PAYER les droits ? (trésorerie, par ordre de décès) ----
+  // Les droits de succession se paient dans les 6 mois, en cash. L'AV est la seule liquidité
+  // garantie hors succession : on compare, à CHAQUE décès, ce que l'enfant doit payer
+  // (succession + 990 I) à ce qu'il encaisse en AV ce jour-là.
+  let avTresoCard = "";
+  if (parents.length && enfants.length) {
+    const ordres = parents.map((par) => ({ par, s: simulerDeces(state, par.id) })).filter((o) => o.s);
+    const etape = (rowsSucc, av990, cash, cashSucc = 0) => enfants.map((e) => {
+      const ds = (rowsSucc.find((r) => r.nom === e.nom) || {}).droits || 0;
+      const da = (av990.find((r) => r.nom === e.nom) || {}).droits || 0;
+      const enc = ((cash || {})[e.id] || 0) + cashSucc / enfants.length;
+      return { nom: e.nom, droits: ds + da, encaisse: enc, net: enc - da, manque: Math.max(0, ds + da - enc) };
+    });
+    let pireManque = 0, manque1er = 0;
+    const blocs = ordres.map(({ par, s }) => {
+      const e1 = etape(s.premierDeces.partEnfants || [], s.premierDeces.av990 || [], s.premierDeces.avCash);
+      const e2 = s.conjoint ? etape(s.secondDeces.parEnfant || [], s.secondDeces.avDenouees || [], s.secondDeces.avCash, s.secondDeces.avRecueConjoint || 0) : [];
+      const m1 = e1.reduce((x, r) => x + r.manque, 0), m2 = e2.reduce((x, r) => x + r.manque, 0);
+      pireManque = Math.max(pireManque, m1 + m2); manque1er = Math.max(manque1er, m1);
+      const tab = (titre, rows) => `<h3 style="margin:12px 0 6px">${titre}</h3><div class="table-wrap"><table class="grid2">
+        <thead><tr><th>Enfant</th><th class="num">Droits à payer (succession + AV)</th><th class="num">AV encaissée ce jour-là${titre.startsWith("2") ? "<br><small>(+ AV reçue par le conjoint au 1ᵉʳ décès)</small>" : ""}</th><th class="num">Reste à financer</th></tr></thead>
+        <tbody>${rows.map((r) => `<tr><td>${r.nom}</td><td class="num">${eur(r.droits)}</td><td class="num">${eur(r.encaisse)}</td><td class="num ${r.manque > 0 ? "droits" : "net"}"><b>${r.manque > 0 ? eur(r.manque) : "✓ couvert"}</b></td></tr>`).join("")}</tbody></table></div>`;
+      return `<details class="faq-q"${par === parents[0] ? " open" : ""}><summary>Si ${par.nom} décède en premier <span class="faq-v">reste à financer : ${eur(m1 + m2)}</span></summary><div class="faq-a">
+        ${tab(`1ᵉʳ décès (${par.nom})`, e1)}${s.conjoint ? tab(`2ᵈ décès (${s.conjoint.nom})`, e2) : ""}</div></details>`;
+    }).join("");
+    // Pistes chiffrées
+    const pistes = [];
+    const avConjoint = (state.av || []).filter((a) => a.clauseType === "conjoint_defaut_enfants" && Number(a.montant) > 0);
+    if (manque1er > 0 && avConjoint.length)
+      pistes.push(`<b>Clause « conjoint, à défaut enfants »</b> (${avConjoint.map((a) => a.libelle || a.id).join(", ")}) : au 1ᵉʳ décès, tout part au conjoint et les enfants ne touchent rien, alors qu'ils doivent déjà payer sur la succession du défunt. → Désigner les <b>enfants directement pour une partie</b> du contrat (jusqu'à 152 500 € par enfant <b>sans droits</b>), le reste au conjoint ; ou une <b>clause démembrée</b> (conjoint usufruitier, enfants nus-propriétaires), qui protège le conjoint mais ne donne pas de cash aux enfants.`);
+    const ageP = (p) => ageDe(p);
+    parents.forEach((p) => {
+      const capParEnf = {};
+      (state.av || []).forEach((a) => {
+        if (a.souscripteurId !== p.id || a.cosouscripteurId || !Number(a.montant) || !avAvant70Effectif(a, state.personnes)) return;
+        const bens = (a.beneficiaires || []).filter((b) => enfants.some((e) => e.id === b));
+        const kids = bens.length ? bens : (a.clauseType === "conjoint_defaut_enfants" ? enfants.map((e) => e.id) : []);
+        kids.forEach((b) => (capParEnf[b] = (capParEnf[b] || 0) + Number(a.montant) / kids.length));
+      });
+      const libre = enfants.reduce((x, e) => x + Math.max(0, AB_AV - (capParEnf[e.id] || 0)), 0);
+      const age = ageP(p);
+      if (libre > 0 && age != null && age < 70)
+        pistes.push(`<b>${p.nom}</b> (${age} ans) peut encore verser <b>${eur(libre)}</b> sur une AV au profit des enfants <b>sans aucun droit</b> (152 500 € par enfant non utilisés) — à faire <b>avant 70 ans</b>. Cet argent sort de la succession (moins de droits) ET sert à payer ceux qui restent.`);
+      else if (age != null && age >= 70)
+        pistes.push(`<b>${p.nom}</b> (${age} ans) : versements après 70 ans → seulement 30 500 € de primes exonérées (757 B), mais <b>tous les gains futurs</b> sont hors droits ; l'AV reste utile comme <b>réserve de cash</b> pour les droits.`);
+    });
+    pistes.push(`Autres sources de cash : liquidités/titres de la succession elle-même, <b>paiement fractionné</b> (3 ans) ou <b>différé</b> des droits sur la nue-propriété (art. 397 A ann. III), ou <b>remboursement du compte courant</b> par la SCI aux héritiers.`);
+    avTresoCard = `<div class="card">
+      <div class="section-head"><div><h2>💧 L'assurance-vie suffit-elle à payer les droits ?</h2><div class="small muted">Les droits se paient <b>dans les 6 mois</b>, en cash. À chaque décès, on compare ce que chaque enfant doit payer à ce qu'il <b>encaisse en assurance-vie ce jour-là</b> (hors succession, versée en quelques semaines).</div></div>
+      <span class="badge ${pireManque > 0 ? "warn" : "ok"}">${pireManque > 0 ? "Manque jusqu'à " + eur(pireManque) : "Droits couverts"}</span></div>
+      ${blocs}
+      <h3 style="margin-top:14px">Que modifier ?</h3>
+      <ul class="small">${pistes.map((t) => `<li style="margin-bottom:6px">${t}</li>`).join("")}</ul>
+    </div>`;
+  }
+
   // ---- ⑦bis AV après décès — plafonds 990 I PAR ASSURÉ → enfant ----
   // Le seuil 852 500 € (152 500 abatt + 700 000 à 20 %) s'apprécie par couple
   // assuré→bénéficiaire : chaque parent ouvre un plafond distinct pour chaque enfant.
@@ -1013,7 +1069,7 @@ async function renderOrganigramme() {
   const CHAPS = [
     { id: "essentiel", titre: "📌 L'essentiel", sous: "Combien, pourquoi, et quoi faire", open: true, html: fiche + faq + recoCard },
     { id: "enfants", titre: "👨‍👩‍👧 Ce que reçoit chaque enfant", sous: "Net perçu, ordre des décès, scénarios", open: false, html: recapEnfants + diptyque + scenarios },
-    { id: "av", titre: "🛡️ Assurance-vie", sous: "Par bénéficiaire, plafonds et marge", open: false, html: avCard + avAssureCard },
+    { id: "av", titre: "🛡️ Assurance-vie", sous: "Paie-t-elle les droits ? Par bénéficiaire, plafonds et marge", open: false, html: avTresoCard + avCard + avAssureCard },
     { id: "detail", titre: "🏦 Le patrimoine en détail", sous: "Brut → net, répartition par parent, qui possède quoi, organigramme", open: false, html: brutNet + mirror + quiPossede + organigramme },
   ].filter((ch) => ch.html.trim());
   const estOuvert = (ch) => (ch.id in chapOpen ? chapOpen[ch.id] : ch.open);
